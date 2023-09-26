@@ -46,21 +46,21 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler=N
                   
             scaler.scale(loss).backward()
             
+            # Gradient clipping 
             if train_config.clip_grad:
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_value_(model.parameters(), train_config.clip_grad) 
             
-            if step % train_config.gradient_accumulation == 0:
-                # Update model parameters (weights)
-                scaler.step(optimizer)
-                scaler.update()
+            # Update model parameters (weights)
+            scaler.step(optimizer)
+            scaler.update()
 
-                # Zero gradients for next step
-                optimizer.zero_grad()
-                
-                # Scheduler
-                if train_config.scheduler == "polynomial" or train_config.scheduler == "cosine" or train_config.scheduler ==  "constant":
-                    scheduler.step()
+            # Zero gradients for next step
+            optimizer.zero_grad()
+            
+            # Scheduler
+            if train_config.scheduler == "polynomial" or train_config.scheduler == "cosine" or train_config.scheduler ==  "constant":
+                scheduler.step()
    
         else:
         
@@ -79,19 +79,18 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler=N
             # Calculate gradient using backward pass
             loss.backward()
             
-                       
+            # Gradient clipping 
             if train_config.clip_grad:
-                torch.nn.utils.clip_grad_value_(model.parameters(), train_config.clip_grad)        
-                        
-            if step % train_config.gradient_accumulation == 0:
-                # Update model parameters (weights)
-                optimizer.step()
-                # Zero gradients for next step
-                optimizer.zero_grad()
-                
-                # Scheduler
-                if train_config.scheduler == "polynomial" or train_config.scheduler == "cosine" or train_config.scheduler ==  "constant":
-                    scheduler.step()
+                torch.nn.utils.clip_grad_value_(model.parameters(), train_config.clip_grad)                  
+            
+            # Update model parameters (weights)
+            optimizer.step()
+            # Zero gradients for next step
+            optimizer.zero_grad()
+            
+            # Scheduler
+            if train_config.scheduler == "polynomial" or train_config.scheduler == "cosine" or train_config.scheduler ==  "constant":
+                scheduler.step()
         
         
         

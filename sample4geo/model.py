@@ -27,7 +27,12 @@ class TimmModel(nn.Module):
     def get_config(self,):
         data_config = timm.data.resolve_model_data_config(self.model)
         return data_config
-            
+    
+    
+    def set_grad_checkpointing(self, enable=True):
+        self.model.set_grad_checkpointing(enable)
+
+        
     def forward(self, img1, img2=None):
         
         if img2 is not None:

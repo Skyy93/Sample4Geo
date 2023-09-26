@@ -4,33 +4,23 @@ import math
 import shutil
 import sys
 import torch
+import pickle
 from dataclasses import dataclass
 from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader
-from reident.dataset.vigor import VigorDatasetEval, VigorDatasetTrain
-from reident.transforms import get_transforms_train, get_transforms_val
-from reident.utils import setup_system, Logger
-from reident.trainer import train
-from reident.evaluate.vigor import evaluate, calc_sim
-from reident.loss import ClipLoss
-from reident.model import TimmModel
 from transformers import get_constant_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup, get_cosine_schedule_with_warmup
-import pickle
+
+from sample4geo.dataset.vigor import VigorDatasetEval, VigorDatasetTrain
+from sample4geo.transforms import get_transforms_train, get_transforms_val
+from sample4geo.utils import setup_system, Logger
+from sample4geo.trainer import train
+from sample4geo.evaluate.vigor import evaluate, calc_sim
+from sample4geo.loss import InfoNCE
+from sample4geo.model import TimmModel
 
 
 @dataclass
-class TrainingConfiguration:
-    '''
-    Describes configuration of the training process
-    '''
-    #--------------------------------------------------------------------------
-    # Timm Models:
-    #--------------------------------------------------------------------------    
-    # 'convnext_base.fb_in22k_ft_in1k_384'   
-    # 'convnextv2_base.fcmae_ft_in22k_in1k_384'
-    # 'vit_base_patch16_384.augreg_in21k_ft_in1k'
-    # 'vit_base_patch16_clip_224.openai'    
-    #--------------------------------------------------------------------------
+class Configuration:
     
     # Model
     model: str = 'convnext_base.fb_in22k_ft_in1k_384'
@@ -73,7 +63,6 @@ class TrainingConfiguration:
     scheduler: str = "cosine"          # "polynomial" | "cosine" | "constant" | None
     warmup_epochs: int = 1
     lr_end: float = 0.0001             #  only for "polynomial"
-    gradient_accumulation: int = 1
     
     # Dataset
     data_folder = "./data/VIGOR"
@@ -81,11 +70,11 @@ class TrainingConfiguration:
     ground_cutting = 0                 # cut ground upper and lower
    
     # Augment Images
-    prob_rotate: float = 0.75           # rotates the sat image and ground images simultaneously
-    prob_flip: float = 0.5              # flipping the sat image and ground images simultaneously
+    prob_rotate: float = 0.75          # rotates the sat image and ground images simultaneously
+    prob_flip: float = 0.5             # flipping the sat image and ground images simultaneously
     
     # Savepath for model checkpoints
-    model_path: str = "./vigor_e40-4_sat-384_ground-384x768_aug_final_same"
+    model_path: str = "./vigor_same"
     
     # Eval before training
     zero_shot: bool = False  
@@ -105,13 +94,13 @@ class TrainingConfiguration:
     # make cudnn deterministic
     cudnn_deterministic: bool = False
 
+
 #-----------------------------------------------------------------------------#
 # Train Config                                                                #
 #-----------------------------------------------------------------------------#
 
-config = TrainingConfiguration() 
+config = Configuration() 
 
-#%%
 
 if __name__ == '__main__':
 
@@ -153,8 +142,12 @@ if __name__ == '__main__':
     new_width = img_size*2    
     new_hight = int(((1024 - 2 * config.ground_cutting) / 2048) * new_width)
     img_size_ground = (new_hight, new_width)
+    
+    # Activate gradient checkpointing
+    if config.grad_checkpointing:
+        model.set_grad_checkpointing(True)
      
-    # load pretrained Checkpoint    
+    # Load pretrained Checkpoint    
     if config.checkpoint_start is not None:  
         print("Start from:", config.checkpoint_start)
         model_state_dict = torch.load(config.checkpoint_start)  
@@ -247,7 +240,6 @@ if __name__ == '__main__':
     print("Reference Images Test:", len(reference_dataset_test))
     
 
-    
     #-----------------------------------------------------------------------------#
     # GPS Sample                                                                  #
     #-----------------------------------------------------------------------------#
@@ -301,9 +293,9 @@ if __name__ == '__main__':
     #-----------------------------------------------------------------------------#
 
     loss_fn = torch.nn.CrossEntropyLoss(label_smoothing=config.label_smoothing)
-    loss_function = ClipLoss(loss_function=loss_fn,
-                             device=config.device,
-                             )
+    loss_function = InfoNCE(loss_function=loss_fn,
+                            device=config.device,
+                            )
 
     if config.mixed_precision:
         scaler = GradScaler(init_scale=2.**10)
@@ -336,7 +328,7 @@ if __name__ == '__main__':
     # Scheduler                                                                   #
     #-----------------------------------------------------------------------------#
 
-    train_steps = math.floor((len(train_dataloader) * config.epochs) / config.gradient_accumulation)
+    train_steps = len(train_dataloader) * config.epochs
     warmup_steps = len(train_dataloader) * config.warmup_epochs
        
     if config.scheduler == "polynomial":

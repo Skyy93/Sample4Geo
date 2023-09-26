@@ -36,10 +36,11 @@ for idx in train_sat_ids :
     
     
 print("Length of gps coords : " +str(len(gps_coords_list)))
+print("Calculation...")
 
 dist = DistanceMetric.get_metric('haversine')
 dm = dist.pairwise(gps_coords_list, gps_coords_list)
-print(dm.shape)
+print("Distance Matrix:", dm.shape)
 
 
 dm_torch = torch.from_numpy(dm)
@@ -58,10 +59,6 @@ for i, idx in enumerate(train_sat_ids):
     
     near_neighbors[idx] = train_sat_ids[ids_near_numpy[i]].tolist()
 
-
+print("Saving...") 
 with open("./data/CVUSA/gps_dict.pkl", "wb") as f:
     pickle.dump(near_neighbors, f)
-
-
-
-

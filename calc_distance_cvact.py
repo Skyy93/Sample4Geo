@@ -1,6 +1,6 @@
 import numpy as np
 from sklearn.metrics import DistanceMetric
-from reident.dataset.cvact import CVACTDatasetTrain
+from sample4geo.dataset.cvact import CVACTDatasetTrain
 import scipy.io as sio
 import pickle
 import torch
@@ -42,10 +42,11 @@ train_idsnum_lookup = np.array(train_idsnum_list)
     
 
 print("Length of gps coords : " +str(len(utm_coords_list)))
+print("Calculation...")
 
 dist = DistanceMetric.get_metric("euclidean")
 dm = dist.pairwise(utm_coords_list, utm_coords_list)
-print(dm.shape)
+print("Distance Matrix:", dm.shape)
 
 
 dm_torch = torch.from_numpy(dm)
@@ -63,10 +64,6 @@ for i, idnum in enumerate(train_idsnum_list):
     
     near_neighbors[idnum] = train_idsnum_lookup[ids_near_numpy[i]].tolist()
 
-
+print("Saving...") 
 with open("./data/CVACT/gps_dict.pkl", "wb") as f:
     pickle.dump(near_neighbors, f)
-
-
-
-

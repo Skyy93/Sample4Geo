@@ -4,32 +4,23 @@ import math
 import shutil
 import sys
 import torch
+import pickle
 from dataclasses import dataclass
 from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader
-from reident.dataset.cvact import CVACTDatasetTrain, CVACTDatasetEval, CVACTDatasetTest
-from reident.transforms import get_transforms_train, get_transforms_val
-from reident.utils import setup_system, Logger
-from reident.trainer import train
-from reident.evaluate.cvusa_and_cvact import evaluate, calc_sim
-from reident.loss import ClipLoss
-from reident.model import TimmModel
 from transformers import get_constant_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup, get_cosine_schedule_with_warmup
-import pickle
+
+from sample4geo.dataset.cvact import CVACTDatasetTrain, CVACTDatasetEval, CVACTDatasetTest
+from sample4geo.transforms import get_transforms_train, get_transforms_val
+from sample4geo.utils import setup_system, Logger
+from sample4geo.trainer import train
+from sample4geo.evaluate.cvusa_and_cvact import evaluate, calc_sim
+from sample4geo.loss import InfoNCE
+from sample4geo.model import TimmModel
+
 
 @dataclass
-class TrainingConfiguration:
-    '''
-    Describes configuration of the training process
-    '''
-    #--------------------------------------------------------------------------
-    # Timm Models:
-    #--------------------------------------------------------------------------    
-    # 'convnext_base.fb_in22k_ft_in1k_384'   
-    # 'convnextv2_base.fcmae_ft_in22k_in1k_384'
-    # 'vit_base_patch16_384.augreg_in21k_ft_in1k'
-    # 'vit_base_patch16_clip_224.openai'    
-    #--------------------------------------------------------------------------
+class Configuration:
     
     # Model
     model: str = 'convnext_base.fb_in22k_ft_in1k_384'
@@ -41,9 +32,9 @@ class TrainingConfiguration:
     mixed_precision: bool = True
     seed = 1
     epochs: int = 40
-    batch_size: int = 128        # keep in mind real_batch_size = 2 * batch_size
+    batch_size: int = 128          # keep in mind real_batch_size = 2 * batch_size
     verbose: bool = True
-    gpu_ids: tuple = (0,1,2,3,4,5,6,7)   # GPU ids for training
+    gpu_ids: tuple = (0,1,2,3)     # GPU ids for training
     
     
     # Similarity Sampling
@@ -56,13 +47,13 @@ class TrainingConfiguration:
  
     # Eval
     batch_size_eval: int = 128
-    eval_every_n_epoch: int = 4      # eval every n Epoch
+    eval_every_n_epoch: int = 4        # eval every n Epoch
     normalize_features: bool = True
 
     # Optimizer 
-    clip_grad = 100.                 # None | float
+    clip_grad = 100.                   # None | float
     decay_exclue_bias: bool = False
-    grad_checkpointing: bool = False # Gradient Checkpointing
+    grad_checkpointing: bool = False   # Gradient Checkpointing
     
     # Loss
     label_smoothing: float = 0.1
@@ -72,14 +63,13 @@ class TrainingConfiguration:
     scheduler: str = "cosine"          # "polynomial" | "cosine" | "constant" | None
     warmup_epochs: int = 1
     lr_end: float = 0.0001             #  only for "polynomial"
-    gradient_accumulation: int = 1
     
     # Dataset
     data_folder = "./data/CVACT"     
     
     # Augment Images
-    prob_rotate: float = 0.75           # rotates the sat image and ground images simultaneously
-    prob_flip: float = 0.5              # flipping the sat image and ground images simultaneously
+    prob_rotate: float = 0.75          # rotates the sat image and ground images simultaneously
+    prob_flip: float = 0.5             # flipping the sat image and ground images simultaneously
     
     # Savepath for model checkpoints
     model_path: str = "./cvact_e40-4_sat-384_ground-140x768_aug_final"
@@ -106,15 +96,15 @@ class TrainingConfiguration:
 # Train Config                                                                #
 #-----------------------------------------------------------------------------#
 
-config = TrainingConfiguration() 
+config = Configuration() 
 
 
 if __name__ == '__main__':
 
 
     model_path = "{}/{}/{}".format(config.model_path,
-                                       config.model,
-                                       time.strftime("%H%M%S"))
+                                   config.model,
+                                   time.strftime("%H%M%S"))
 
     if not os.path.exists(model_path):
         os.makedirs(model_path)
@@ -149,8 +139,12 @@ if __name__ == '__main__':
     new_width = config.img_size * 2    
     new_hight = round((224 / 1232) * new_width)
     img_size_ground = (new_hight, new_width)
+    
+    # Activate gradient checkpointing
+    if config.grad_checkpointing:
+        model.set_grad_checkpointing(True)
      
-    # load pretrained Checkpoint    
+    # Load pretrained Checkpoint    
     if config.checkpoint_start is not None:  
         print("Start from:", config.checkpoint_start)
         model_state_dict = torch.load(config.checkpoint_start)  
@@ -291,9 +285,9 @@ if __name__ == '__main__':
     #-----------------------------------------------------------------------------#
 
     loss_fn = torch.nn.CrossEntropyLoss(label_smoothing=config.label_smoothing)
-    loss_function = ClipLoss(loss_function=loss_fn,
-                             device=config.device,
-                             )
+    loss_function = InfoNCE(loss_function=loss_fn,
+                            device=config.device,
+                            )
 
     if config.mixed_precision:
         scaler = GradScaler(init_scale=2.**10)
@@ -326,7 +320,7 @@ if __name__ == '__main__':
     # Scheduler                                                                   #
     #-----------------------------------------------------------------------------#
 
-    train_steps = math.floor((len(train_dataloader) * config.epochs) / config.gradient_accumulation)
+    train_steps = len(train_dataloader) * config.epochs
     warmup_steps = len(train_dataloader) * config.warmup_epochs
        
     if config.scheduler == "polynomial":

@@ -7,33 +7,24 @@ import torch
 from dataclasses import dataclass
 from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader
-from reident.dataset.university import U1652DatasetEval, U1652DatasetTrain, get_transforms
-from reident.utils import setup_system, Logger
-from reident.trainer import train
-from reident.evaluate.university import evaluate
-from reident.loss import ClipLoss
-from reident.model import TimmModel
 from transformers import get_constant_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup, get_cosine_schedule_with_warmup
 
+from sample4geo.dataset.university import U1652DatasetEval, U1652DatasetTrain, get_transforms
+from sample4geo.utils import setup_system, Logger
+from sample4geo.trainer import train
+from sample4geo.evaluate.university import evaluate
+from sample4geo.loss import InfoNCE
+from sample4geo.model import TimmModel
+
+
 @dataclass
-class TrainingConfiguration:
-    '''
-    Describes configuration of the training process
-    '''
-    #--------------------------------------------------------------------------
-    # Timm Models:
-    #--------------------------------------------------------------------------    
-    # 'convnext_base.fb_in22k_ft_in1k_384'   
-    # 'convnextv2_base.fcmae_ft_in22k_in1k_384'
-    # 'vit_base_patch16_384.augreg_in21k_ft_in1k'
-    # 'vit_base_patch16_clip_224.openai'    
-    #--------------------------------------------------------------------------
+class Configuration:
     
     # Model
     model: str = 'convnext_base.fb_in22k_ft_in1k_384'
     
     # Override model image size
-    img_size: int = 512
+    img_size: int = 384
     
     # Training 
     mixed_precision: bool = True
@@ -42,7 +33,7 @@ class TrainingConfiguration:
     epochs: int = 1
     batch_size: int = 128                # keep in mind real_batch_size = 2 * batch_size
     verbose: bool = True
-    gpu_ids: tuple = (0,1,2,3,4,5,6,7)           # GPU ids for training
+    gpu_ids: tuple = (0,1,2,3)           # GPU ids for training
     
     # Eval
     batch_size_eval: int = 128
@@ -63,18 +54,16 @@ class TrainingConfiguration:
     scheduler: str = "cosine"           # "polynomial" | "cosine" | "constant" | None
     warmup_epochs: int = 0.1
     lr_end: float = 0.0001               #  only for "polynomial"
-    gradient_accumulation: int = 1
     
     # Dataset
     dataset: str = 'U1652-D2S'           # 'U1652-D2S' | 'U1652-S2D'
     data_folder: str = "./data/U1652"
-    single_sample: bool = False
     
     # Augment Images
     prob_flip: float = 0.5              # flipping the sat image and drone image simultaneously
     
     # Savepath for model checkpoints
-    model_path: str = "./university_e40_eval4_384_aug_final"
+    model_path: str = "./university"
     
     # Eval before training
     zero_shot: bool = False
@@ -94,11 +83,12 @@ class TrainingConfiguration:
     # make cudnn deterministic
     cudnn_deterministic: bool = False
 
+
 #-----------------------------------------------------------------------------#
 # Train Config                                                                #
 #-----------------------------------------------------------------------------#
 
-config = TrainingConfiguration() 
+config = Configuration() 
 
 if config.dataset == 'U1652-D2S':
     config.query_folder_train = './data/U1652/train/satellite'
@@ -111,7 +101,6 @@ elif config.dataset == 'U1652-S2D':
     config.query_folder_test = './data/U1652/test/query_satellite'
     config.gallery_folder_test = './data/U1652/test/gallery_drone'
 
-#%%
 
 if __name__ == '__main__':
 
@@ -147,8 +136,11 @@ if __name__ == '__main__':
     std = data_config["std"]
     img_size = (config.img_size, config.img_size)
     
-
-    # load pretrained Checkpoint    
+    # Activate gradient checkpointing
+    if config.grad_checkpointing:
+        model.set_grad_checkpointing(True)
+    
+    # Load pretrained Checkpoint    
     if config.checkpoint_start is not None:  
         print("Start from:", config.checkpoint_start)
         model_state_dict = torch.load(config.checkpoint_start)  
@@ -182,7 +174,6 @@ if __name__ == '__main__':
                                       transforms_gallery=train_drone_transforms,
                                       prob_flip=config.prob_flip,
                                       shuffle_batch_size=config.batch_size,
-                                      single_sample=config.single_sample
                                       )
     
     train_dataloader = DataLoader(train_dataset,
@@ -225,9 +216,9 @@ if __name__ == '__main__':
     #-----------------------------------------------------------------------------#
 
     loss_fn = torch.nn.CrossEntropyLoss(label_smoothing=config.label_smoothing)
-    loss_function = ClipLoss(loss_function=loss_fn,
-                             device=config.device,
-                             )
+    loss_function = InfoNCE(loss_function=loss_fn,
+                            device=config.device,
+                            )
 
     if config.mixed_precision:
         scaler = GradScaler(init_scale=2.**10)
@@ -260,7 +251,7 @@ if __name__ == '__main__':
     # Scheduler                                                                   #
     #-----------------------------------------------------------------------------#
 
-    train_steps = math.floor((len(train_dataloader) * config.epochs) / config.gradient_accumulation)
+    train_steps = len(train_dataloader) * config.epochs
     warmup_steps = len(train_dataloader) * config.warmup_epochs
        
     if config.scheduler == "polynomial":
