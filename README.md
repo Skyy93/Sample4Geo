@@ -27,7 +27,7 @@ We provide a conda environment to ensure compatibility.
     ├── VIGOR/ 
     ├── CVUSA/	
     └── CVACT/
-  └──reident/
+  └──sample4geo/
 
 ```
 
