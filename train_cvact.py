@@ -72,7 +72,7 @@ class Configuration:
     prob_flip: float = 0.5             # flipping the sat image and ground images simultaneously
     
     # Savepath for model checkpoints
-    model_path: str = "./cvact_e40-4_sat-384_ground-140x768_aug_final"
+    model_path: str = "./cvact"
     
     # Eval before training
     zero_shot: bool = False
