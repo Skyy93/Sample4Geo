@@ -15,7 +15,7 @@ In this repository we present our ICCV accepted work: "Sample4Geo: Hard Negative
 For training and testing the provided code download the datasets and extract them as shown in the folder structure. Before training the dataset depending calc\_distance script has to be executed to generate the distances based on the GPS locations. 
 Afterwards for each dataset a unique train script can be executed. The pre-trained weights should be extracted into the folder pretrained to run the eval scripts.
 
-We provide a conda environment to ensure compatibility.
+We provide a requirements.txt file to ensure compatibility.
 
 ## Folder Structure:
 
