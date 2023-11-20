@@ -112,4 +112,7 @@ def print_time_stats(t_train_start, t_epoch_start, epochs_remaining, steps_per_e
         
     print("Elapsed {}, {} time/epoch, {:.2f} s/batch, remaining {}".format(
                 sec_to_time(elapsed_time), sec_to_time(speed_epoch), speed_batch, sec_to_time(eta)))
-    
+
+def print_dist(text, rank):
+    if rank < 1:
+        print(text)

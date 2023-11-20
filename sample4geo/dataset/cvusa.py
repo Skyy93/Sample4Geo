@@ -7,7 +7,8 @@ import copy
 import torch
 from tqdm import tqdm
 import time
- 
+from sample4geo.utils import print_dist
+
 class CVUSADatasetTrain(Dataset):
     
     def __init__(self,
@@ -102,13 +103,13 @@ class CVUSADatasetTrain(Dataset):
         
         
             
-    def shuffle(self, sim_dict=None, neighbour_select=64, neighbour_range=128):
+    def shuffle(self, sim_dict=None, neighbour_select=64, neighbour_range=128, rank=-1):
 
             '''
             custom shuffle function for unique class_id sampling in batch
             '''
             
-            print("\nShuffle Dataset:")
+            print_dist("\nShuffle Dataset:", rank)
             
             idx_pool = copy.deepcopy(self.train_ids)
         
@@ -203,11 +204,11 @@ class CVUSADatasetTrain(Dataset):
             time.sleep(0.3)
             
             self.samples = batches
-            print("idx_pool:", len(idx_pool))
-            print("Original Length: {} - Length after Shuffle: {}".format(len(self.train_ids), len(self.samples))) 
-            print("Break Counter:", break_counter)
-            print("Pairs left out of last batch to avoid creating noise:", len(self.train_ids) - len(self.samples))
-            print("First Element ID: {} - Last Element ID: {}".format(self.samples[0], self.samples[-1]))  
+            print_dist("idx_pool: " + str(len(idx_pool)), rank)
+            print_dist("Original Length: {} - Length after Shuffle: {}".format(len(self.train_ids), len(self.samples)), rank) 
+            print_dist("Break Counter: " + str(break_counter), rank)
+            print_dist("Pairs left out of last batch to avoid creating noise:" + str(len(self.train_ids) - len(self.samples)), rank)
+            print_dist("First Element ID: {} - Last Element ID: {}".format(self.samples[0], self.samples[-1]), rank)  
 
             
        

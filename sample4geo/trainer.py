@@ -5,7 +5,7 @@ from .utils import AverageMeter
 from torch.cuda.amp import autocast
 import torch.nn.functional as F
 
-def train(train_config, model, dataloader, loss_function, optimizer, scheduler=None, scaler=None):
+def train(train_config, model, dataloader, loss_function, optimizer, scheduler=None, scaler=None, rank=-1):
 
     # set model train mode
     model.train()
@@ -20,7 +20,7 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler=N
     
     step = 1
     
-    if train_config.verbose:
+    if train_config.verbose and rank < 1:
         bar = tqdm(dataloader, total=len(dataloader))
     else:
         bar = dataloader
@@ -31,13 +31,13 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler=N
         if scaler:
             with autocast():
             
-                # data (batches) to device   
+                # data (batches) to device
                 query = query.to(train_config.device)
                 reference = reference.to(train_config.device)
             
                 # Forward pass
                 features1, features2 = model(query, reference)
-                if torch.cuda.device_count() > 1 and len(train_config.gpu_ids) > 1: 
+                if train_config.ddp and 0: 
                     loss = loss_function(features1, features2, model.module.logit_scale.exp())
                 else:
                     loss = loss_function(features1, features2, model.logit_scale.exp()) 
@@ -94,7 +94,7 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler=N
         
         
         
-        if train_config.verbose:
+        if train_config.verbose and rank < 1:
             
             monitor = {"loss": "{:.4f}".format(loss.item()),
                        "loss_avg": "{:.4f}".format(losses.avg),
@@ -104,7 +104,7 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler=N
         
         step += 1
 
-    if train_config.verbose:
+    if train_config.verbose and rank < 1:
         bar.close()
 
     return losses.avg
