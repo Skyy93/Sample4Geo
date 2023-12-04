@@ -31,7 +31,7 @@ class Configuration:
     
     # Training 
     mixed_precision: bool = True
-    seed = 42
+    seed = 1
     epochs: int = 40
     batch_size: int = 32        # keep in mind real_batch_size = 2 * batch_size
     verbose: bool = True

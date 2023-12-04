@@ -9,6 +9,8 @@ from tqdm import tqdm
 import time
 from sample4geo.utils import print_dist
 
+cv2.setNumThreads(2)
+
 class CVUSADatasetTrain(Dataset):
     
     def __init__(self,
