@@ -48,7 +48,7 @@ class Configuration:
  
     # Eval
     batch_size_eval: int = 128
-    eval_every_n_epoch: int = 4        # eval every n Epoch
+    eval_every_n_epoch: int = 1        # eval every n Epoch
     normalize_features: bool = True
 
     # Optimizer 
@@ -82,7 +82,7 @@ class Configuration:
     checkpoint_start = None   
   
     # set num_workers to 0 if on Windows
-    num_workers: int = 0 if os.name == 'nt' else 4 
+    num_workers: int = 0 if os.name == 'nt' else 8 
     
     # train on GPU if available
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu' 
@@ -105,6 +105,14 @@ if 'LOCAL_RANK' in os.environ:
     WORLD_SIZE = int(os.environ['WORLD_SIZE'])
     WORLD_RANK = int(os.environ['RANK'])
     config.ddp = True
+else:
+    print("*" * 30)
+    print("*")
+    print("*   WARNING: You are not using DDP, training is slower and results might be worse")
+    print("*")
+    print("*" * 30)
+    LOCAL_RANK = -1
+    WORLD_SIZE = 1
 
 
 def main():
@@ -163,8 +171,8 @@ def main():
     if config.ddp:
         device = torch.device("cuda:{}".format(LOCAL_RANK))
         config.device = device
-        model = model.to(device)
-        ddp_model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[LOCAL_RANK], output_device=LOCAL_RANK)
+        model = model.to(config.device)
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[LOCAL_RANK])
     else:
         model = model.to(config.device)
 
@@ -192,15 +200,19 @@ def main():
                                       transforms_reference=sat_transforms_train,
                                       prob_flip=config.prob_flip,
                                       prob_rotate=config.prob_rotate,
-                                      shuffle_batch_size=config.batch_size
+                                      shuffle_batch_size=config.batch_size * WORLD_SIZE
                                       )
     
-    
+    if config.ddp:
+        sampler = DistributedSampler(dataset=train_dataset, shuffle=not config.custom_sampling)
+    else:
+        sampler = None
+
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=config.batch_size,
                                   num_workers=config.num_workers,
                                   shuffle=False,
-                                  sampler=DistributedSampler(dataset=train_dataset, shuffle=not config.custom_sampling),
+                                  sampler=sampler,
                                   pin_memory=True)
     
     

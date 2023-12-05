@@ -21,8 +21,8 @@ class InfoNCE(nn.Module):
 
         features1 = F.normalize(features1, dim=-1)
         features2 = F.normalize(features2, dim=-1)
- 
-        features1, features2 = gather_features(features1, features2)
+        if dist.is_initialized(): 
+            features1, features2 = gather_features(features1, features2)
         
         logits_per_feat1 = logit_scale * features1 @ features2.T
         logits_per_feat2 = logits_per_feat1.T

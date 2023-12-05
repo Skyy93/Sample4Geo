@@ -37,15 +37,14 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler=N
             
                 # Forward pass
                 features1, features2 = model(query, reference)
-                if train_config.ddp and 0: 
+                if train_config.ddp: 
                     loss = loss_function(features1, features2, model.module.logit_scale.exp())
                 else:
                     loss = loss_function(features1, features2, model.logit_scale.exp()) 
                 losses.update(loss.item())
-                
-                  
+
             scaler.scale(loss).backward()
-            
+
             # Gradient clipping 
             if train_config.clip_grad:
                 scaler.unscale_(optimizer)
