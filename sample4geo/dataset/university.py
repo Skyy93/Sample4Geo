@@ -9,6 +9,8 @@ from tqdm import tqdm
 import time
 import random
 
+cv2.setNumThreads(2)
+
 def get_data(path):
     data = {}
     for root, dirs, files in os.walk(path, topdown=False):

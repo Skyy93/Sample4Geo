@@ -8,7 +8,9 @@ import torch
 from tqdm import tqdm
 from collections import defaultdict
 import time
- 
+
+cv2.setNumThreads(2)
+
 class VigorDatasetTrain(Dataset):
     
     def __init__(self,

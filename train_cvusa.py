@@ -48,7 +48,7 @@ class Configuration:
  
     # Eval
     batch_size_eval: int = 128
-    eval_every_n_epoch: int = 1        # eval every n Epoch
+    eval_every_n_epoch: int = 4        # eval every n Epoch
     normalize_features: bool = True
 
     # Optimizer 
