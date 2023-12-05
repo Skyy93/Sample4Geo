@@ -8,6 +8,7 @@ import copy
 from tqdm import tqdm
 import time
 import random
+from sample4geo.utils import print_dist
 
 cv2.setNumThreads(2)
 
@@ -89,83 +90,83 @@ class U1652DatasetTrain(Dataset):
         return len(self.samples)
     
     
-    def shuffle(self, ):
+    def shuffle(self, rank=-1):
 
-            '''
-            custom shuffle function for unique class_id sampling in batch
-            '''
+        '''
+        custom shuffle function for unique class_id sampling in batch
+        '''
+        print_dist("\nShuffle Dataset:", rank)
+ 
             
-            print("\nShuffle Dataset:")
-            
-            pair_pool = copy.deepcopy(self.pairs)
+        pair_pool = copy.deepcopy(self.pairs)
               
-            # Shuffle pairs order
-            random.shuffle(pair_pool)
+        # Shuffle pairs order
+        random.shuffle(pair_pool)
            
             
-            # Lookup if already used in epoch
-            pairs_epoch = set()   
-            idx_batch = set()
+        # Lookup if already used in epoch
+        pairs_epoch = set()   
+        idx_batch = set()
      
-            # buckets
-            batches = []
-            current_batch = []
+        # buckets
+        batches = []
+        current_batch = []
              
-            # counter
-            break_counter = 0
-            
-            # progressbar
-            pbar = tqdm()
+        # counter
+        break_counter = 0
+        
+        # progressbar
+        pbar = tqdm()
     
-            while True:
+        while True:
                 
-                pbar.update()
+            pbar.update()
                 
-                if len(pair_pool) > 0:
-                    pair = pair_pool.pop(0)
+            if len(pair_pool) > 0:
+                pair = pair_pool.pop(0)
                     
-                    idx, _, _ = pair
+                idx, _, _ = pair
                     
-                    if idx not in idx_batch and pair not in pairs_epoch:
+                if idx not in idx_batch and pair not in pairs_epoch:
                         
-                        idx_batch.add(idx)
-                        current_batch.append(pair)
-                        pairs_epoch.add(pair)
+                    idx_batch.add(idx)
+                    current_batch.append(pair)
+                    pairs_epoch.add(pair)
             
-                        break_counter = 0
+                    break_counter = 0
                         
-                    else:
-                        # if pair fits not in batch and is not already used in epoch -> back to pool
-                        if pair not in pairs_epoch:
-                            pair_pool.append(pair)
-                            
-                        break_counter += 1
-                        
-                    if break_counter >= 512:
-                        break
-                   
                 else:
+                    # if pair fits not in batch and is not already used in epoch -> back to pool
+                    if pair not in pairs_epoch:
+                        pair_pool.append(pair)
+                            
+                    break_counter += 1
+                        
+                if break_counter >= 512:
                     break
+                   
+            else:
+                break
 
-                if len(current_batch) >= self.shuffle_batch_size:
+            if len(current_batch) >= self.shuffle_batch_size:
                 
-                    # empty current_batch bucket to batches
-                    batches.extend(current_batch)
-                    idx_batch = set()
-                    current_batch = []
+                # empty current_batch bucket to batches
+                batches.extend(current_batch)
+                idx_batch = set()
+                current_batch = []
        
-            pbar.close()
+        pbar.close()
             
-            # wait before closing progress bar
-            time.sleep(0.3)
+        # wait before closing progress bar
+        time.sleep(0.3)
             
-            self.samples = batches
+        self.samples = batches
             
-            print("Original Length: {} - Length after Shuffle: {}".format(len(self.pairs), len(self.samples))) 
-            print("Break Counter:", break_counter)
-            print("Pairs left out of last batch to avoid creating noise:", len(self.pairs) - len(self.samples))
-            print("First Element ID: {} - Last Element ID: {}".format(self.samples[0][0], self.samples[-1][0]))  
-    
+        print_dist("Original Length: {} - Length after Shuffle: {}".format(len(self.pairs), len(self.samples)), rank) 
+        print_dist("Break Counter: " + str(break_counter), rank)
+        print_dist("Pairs left out of last batch to avoid creating noise:" + str(len(self.pairs) - len(self.samples)), rank)
+        print_dist("First Element ID: {} - Last Element ID: {}".format(self.samples[0], self.samples[-1]), rank)  
+ 
         
         
 class U1652DatasetEval(Dataset):
@@ -217,19 +218,6 @@ class U1652DatasetEval(Dataset):
         
         img = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        
-        
-        #if self.mode == "sat":
-        
-        #    img90 = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
-        #    img180 = cv2.rotate(img90, cv2.ROTATE_90_CLOCKWISE)
-        #    img270 = cv2.rotate(img180, cv2.ROTATE_90_CLOCKWISE)
-            
-        #    img_0_90 = np.concatenate([img, img90], axis=1)
-        #    img_180_270 = np.concatenate([img180, img270], axis=1)
-            
-        #    img = np.concatenate([img_0_90, img_180_270], axis=0)
-            
         
         
         # image transforms

@@ -33,7 +33,7 @@ class Configuration:
     mixed_precision: bool = True
     seed = 1
     epochs: int = 2
-    batch_size: int = 32          # keep in mind real_batch_size = 2 * batch_size
+    batch_size: int = 32          # keep in mind real_batch_size = 2 * batch_size * WORLD_SIZE
     verbose: bool = True
     gpu_ids: tuple = (0,1,2,3)     # GPU ids for training
     ddp: bool = False
@@ -121,10 +121,10 @@ if __name__ == '__main__':
     model_path = "{}/{}/{}".format(config.model_path,
                                    config.model,
                                    time.strftime("%H%M%S"))
-
-    if not os.path.exists(model_path):
-        os.makedirs(model_path)
-    shutil.copyfile(os.path.basename(__file__), "{}/train.py".format(model_path))
+    if LOCAL_RANK < 1:
+        if not os.path.exists(model_path):
+            os.makedirs(model_path)
+        shutil.copyfile(os.path.basename(__file__), "{}/train.py".format(model_path))
 
     # Redirect print to both console and log file
     sys.stdout = Logger(os.path.join(model_path, 'log.txt'))
@@ -418,7 +418,8 @@ if __name__ == '__main__':
                            loss_function=loss_function,
                            optimizer=optimizer,
                            scheduler=scheduler,
-                           scaler=scaler)
+                           scaler=scaler,
+                           rank=LOCAL_RANK)
         
         print_dist("Epoch: {}, Train Loss = {:.3f}, Lr = {:.6f}".format(epoch,
                                                                    train_loss,

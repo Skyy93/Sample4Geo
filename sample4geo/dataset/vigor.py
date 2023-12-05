@@ -8,6 +8,7 @@ import torch
 from tqdm import tqdm
 from collections import defaultdict
 import time
+from sample4geo.utils import print_dist
 
 cv2.setNumThreads(2)
 
@@ -141,15 +142,13 @@ class VigorDatasetTrain(Dataset):
     def __len__(self):
         return len(self.samples)
         
-        
-            
-    def shuffle(self, sim_dict=None, neighbour_select=8, neighbour_range=16):
+    def shuffle(self, sim_dict=None, neighbour_select=8, neighbour_range=16, rank=-1):
 
             '''
             custom shuffle function for unique class_id sampling in batch
             '''
             
-            print("\nShuffle Dataset:")
+            print_dist("\nShuffle Dataset:", rank)
             
             pair_pool = copy.deepcopy(self.pairs)
             idx2pair_pool = copy.deepcopy(self.idx2pairs)
@@ -262,12 +261,11 @@ class VigorDatasetTrain(Dataset):
             time.sleep(0.3)
             
             self.samples = batches
-            print("pair_pool:", len(pair_pool))
-            print("Original Length: {} - Length after Shuffle: {}".format(len(self.pairs), len(self.samples))) 
-            print("Break Counter:", break_counter)
-            print("Pairs left out of last batch to avoid creating noise:", len(self.pairs) - len(self.samples))
-            print("First Element ID: {} - Last Element ID: {}".format(self.samples[0][1], self.samples[-1][1]))  
-
+            print_dist("idx_pool: " + str(len(idx_pool)), rank)
+            print_dist("Original Length: {} - Length after Shuffle: {}".format(len(self.train_ids), len(self.samples)), rank) 
+            print_dist("Break Counter: " + str(break_counter), rank)
+            print_dist("Pairs left out of last batch to avoid creating noise:" + str(len(self.train_ids) - len(self.samples)), rank)
+            print_dist("First Element ID: {} - Last Element ID: {}".format(self.samples[0], self.samples[-1]), rank)  
             
        
 class VigorDatasetEval(Dataset):

@@ -9,10 +9,11 @@ from dataclasses import dataclass
 from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader
 from transformers import get_constant_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup, get_cosine_schedule_with_warmup
+from torch.utils.data.distributed import DistributedSampler
 
 from sample4geo.dataset.vigor import VigorDatasetEval, VigorDatasetTrain
 from sample4geo.transforms import get_transforms_train, get_transforms_val
-from sample4geo.utils import setup_system, Logger
+from sample4geo.utils import setup_system, Logger, print_dist
 from sample4geo.trainer import train
 from sample4geo.evaluate.vigor import evaluate, calc_sim
 from sample4geo.loss import InfoNCE
@@ -32,7 +33,7 @@ class Configuration:
     mixed_precision: bool = True
     seed = 1
     epochs: int = 40
-    batch_size: int = 128        # keep in mind real_batch_size = 2 * batch_size
+    batch_size: int = 32        # keep in mind real_batch_size = 2 * batch_size * WORLD_SIZE
     verbose: bool = True
     gpu_ids: tuple = (0,1,2,3,4,5,6,7)   # GPU ids for training
     
@@ -101,6 +102,19 @@ class Configuration:
 
 config = Configuration() 
 
+if 'LOCAL_RANK' in os.environ:
+    LOCAL_RANK = int(os.environ['LOCAL_RANK'])
+    WORLD_SIZE = int(os.environ['WORLD_SIZE'])
+    WORLD_RANK = int(os.environ['RANK'])
+    config.ddp = True
+else:
+    print("*" * 30)
+    print("*")
+    print("*   WARNING: You are not using DDP, training is slower and results might be worse")
+    print("*")
+    print("*" * 30)
+    LOCAL_RANK = -1
+    WORLD_SIZE = 1
 
 if __name__ == '__main__':
 
@@ -124,7 +138,7 @@ if __name__ == '__main__':
     # Model                                                                       #
     #-----------------------------------------------------------------------------#
         
-    print("\nModel: {}".format(config.model))
+    print_dist("\nModel: {}".format(config.model), LOCAL_RANK)
 
 
     model = TimmModel(config.model,
@@ -149,22 +163,23 @@ if __name__ == '__main__':
      
     # Load pretrained Checkpoint    
     if config.checkpoint_start is not None:  
-        print("Start from:", config.checkpoint_start)
+        print_dist("Start from:", config.checkpoint_start, LOCAL_RANK)
         model_state_dict = torch.load(config.checkpoint_start)  
         model.load_state_dict(model_state_dict, strict=False)     
 
-    # Data parallel
-    print("GPUs available:", torch.cuda.device_count())  
-    if torch.cuda.device_count() > 1 and len(config.gpu_ids) > 1:
-        model = torch.nn.DataParallel(model, device_ids=config.gpu_ids)
-            
-    # Model to device   
-    model = model.to(config.device)
+    # Model to device
+    if config.ddp:
+        device = torch.device("cuda:{}".format(LOCAL_RANK))
+        config.device = device
+        model = model.to(config.device)
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[LOCAL_RANK])
+    else:
+        model = model.to(config.device)
 
-    print("\nImage Size Sat:", image_size_sat)
-    print("Image Size Ground:", img_size_ground)
-    print("Mean: {}".format(mean))
-    print("Std:  {}\n".format(std)) 
+    print_dist("\nImage Size Sat: " + str(image_size_sat), LOCAL_RANK)
+    print_dist("Image Size Ground:" + str(img_size_ground), LOCAL_RANK)
+    print_dist("Mean: {}".format(mean), LOCAL_RANK)
+    print_dist("Std:  {}\n".format(std), LOCAL_RANK) 
 
 
     #-----------------------------------------------------------------------------#
@@ -186,15 +201,20 @@ if __name__ == '__main__':
                                       transforms_reference=sat_transforms_train,
                                       prob_flip=config.prob_flip,
                                       prob_rotate=config.prob_rotate,
-                                      shuffle_batch_size=config.batch_size
+                                      shuffle_batch_size=config.batch_size * WORLD_SIZE
                                       )
-    
+
+    if config.ddp:                                               
+        sampler = DistributedSampler(dataset=train_dataset, shuffle=not config.custom_sampling)
+    else:                                                                              
+        sampler = None
     
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=config.batch_size,
                                   num_workers=config.num_workers,
-                                  shuffle=not config.custom_sampling,
-                                  pin_memory=True)
+                                  shuffle=False,
+                                  pin_memory=True,
+                                  sampler=sampler)
     
     
     # Eval
@@ -236,9 +256,9 @@ if __name__ == '__main__':
                                        pin_memory=True)
     
     
-    print("Query Images Test:", len(query_dataset_test))
-    print("Reference Images Test:", len(reference_dataset_test))
-    
+    print_dist("Reference Images Test: " + str(len(reference_dataset_test)), LOCAL_RANK)
+    print_dist("Query Images Test: " + str(len(query_dataset_test)), LOCAL_RANK)
+ 
 
     #-----------------------------------------------------------------------------#
     # GPS Sample                                                                  #
@@ -253,7 +273,7 @@ if __name__ == '__main__':
     # Sim Sample + Eval on Train                                                  #
     #-----------------------------------------------------------------------------#
     
-    if config.sim_sample:
+    if config.sim_sample and LOCAL_RANK < 1:
 
         # Query Ground Images Train for simsampling
         query_dataset_train = VigorDatasetEval(data_folder=config.data_folder ,
@@ -294,7 +314,6 @@ if __name__ == '__main__':
 
     loss_fn = torch.nn.CrossEntropyLoss(label_smoothing=config.label_smoothing)
     loss_function = InfoNCE(loss_function=loss_fn,
-                            device=config.device,
                             )
 
     if config.mixed_precision:
@@ -332,7 +351,7 @@ if __name__ == '__main__':
     warmup_steps = len(train_dataloader) * config.warmup_epochs
        
     if config.scheduler == "polynomial":
-        print("\nScheduler: polynomial - max LR: {} - end LR: {}".format(config.lr, config.lr_end))  
+        print_dist("\nScheduler: polynomial - max LR: {} - end LR: {}".format(config.lr, config.lr_end), LOCAL_RANK)  
         scheduler = get_polynomial_decay_schedule_with_warmup(optimizer,
                                                               num_training_steps=train_steps,
                                                               lr_end = config.lr_end,
@@ -340,28 +359,30 @@ if __name__ == '__main__':
                                                               num_warmup_steps=warmup_steps)
         
     elif config.scheduler == "cosine":
-        print("\nScheduler: cosine - max LR: {}".format(config.lr))   
+        print_dist("\nScheduler: cosine - max LR: {}".format(config.lr), LOCAL_RANK)   
         scheduler = get_cosine_schedule_with_warmup(optimizer,
                                                     num_training_steps=train_steps,
                                                     num_warmup_steps=warmup_steps)
         
     elif config.scheduler == "constant":
-        print("\nScheduler: constant - max LR: {}".format(config.lr))   
+        print_dist("\nScheduler: constant - max LR: {}".format(config.lr), LOCAL_RANK)   
         scheduler =  get_constant_schedule_with_warmup(optimizer,
                                                        num_warmup_steps=warmup_steps)
            
     else:
         scheduler = None
         
-    print("Warmup Epochs: {} - Warmup Steps: {}".format(str(config.warmup_epochs).ljust(2), warmup_steps))
-    print("Train Epochs:  {} - Train Steps:  {}".format(config.epochs, train_steps))
-        
+    print_dist("Warmup Epochs: {} - Warmup Steps: {}".format(str(config.warmup_epochs).ljust(2), warmup_steps), LOCAL_RANK)
+    print_dist("Train Epochs:  {} - Train Steps:  {}".format(config.epochs, train_steps), LOCAL_RANK)
+      
         
     #-----------------------------------------------------------------------------#
     # Zero Shot                                                                   #
     #-----------------------------------------------------------------------------#
-    if config.zero_shot:
+    if config.zero_shot and LOCAL_RANK < 1:
         print("\n{}[{}]{}".format(30*"-", "Zero Shot", 30*"-"))  
+        
+        torch.cuda.synchronize(torch.cuda.current_device())
 
         r1_test = evaluate(config=config,
                            model=model,
@@ -386,7 +407,8 @@ if __name__ == '__main__':
     if config.custom_sampling:
         train_dataloader.dataset.shuffle(sim_dict,
                                          neighbour_select=config.neighbour_select,
-                                         neighbour_range=config.neighbour_range)
+                                         neighbour_range=config.neighbour_range,
+                                         rank=LOCAL_RANK)
             
     #-----------------------------------------------------------------------------#
     # Train                                                                       #
@@ -397,7 +419,7 @@ if __name__ == '__main__':
 
     for epoch in range(1, config.epochs+1):
         
-        print("\n{}[Epoch: {}]{}".format(30*"-", epoch, 30*"-"))
+        print_dist("\n{}[Epoch: {}]{}".format(30*"-", epoch, 30*"-"), LOCAL_RANK)
         
 
         train_loss = train(config,
@@ -406,15 +428,16 @@ if __name__ == '__main__':
                            loss_function=loss_function,
                            optimizer=optimizer,
                            scheduler=scheduler,
-                           scaler=scaler)
+                           scaler=scaler,
+                           rank=LOCAL_RANK)
         
-        print("Epoch: {}, Train Loss = {:.3f}, Lr = {:.6f}".format(epoch,
+        print_dist("Epoch: {}, Train Loss = {:.3f}, Lr = {:.6f}".format(epoch,
                                                                    train_loss,
-                                                                   optimizer.param_groups[0]['lr']))
+                                                                   optimizer.param_groups[0]['lr']), LOCAL_RANK)
         
         # evaluate
-        if (epoch % config.eval_every_n_epoch == 0 and epoch != 0) or epoch == config.epochs:
-        
+        if ((epoch % config.eval_every_n_epoch == 0 and epoch != 0) or epoch == config.epochs) and LOCAL_RANK < 1:
+            torch.cuda.synchronize(torch.cuda.current_device()) 
             print("\n{}[{}]{}".format(30*"-", "Evaluate", 30*"-"))
         
             r1_test = evaluate(config=config,
@@ -437,7 +460,7 @@ if __name__ == '__main__':
 
                 best_score = r1_test
 
-                if torch.cuda.device_count() > 1 and len(config.gpu_ids) > 1:
+                if config.ddp and LOCAL_RANK==0:
                     torch.save(model.module.state_dict(), '{}/weights_e{}_{:.4f}.pth'.format(model_path, epoch, r1_test))
                 else:
                     torch.save(model.state_dict(), '{}/weights_e{}_{:.4f}.pth'.format(model_path, epoch, r1_test))
@@ -446,9 +469,10 @@ if __name__ == '__main__':
         if config.custom_sampling:
             train_dataloader.dataset.shuffle(sim_dict,
                                              neighbour_select=config.neighbour_select,
-                                             neighbour_range=config.neighbour_range)
+                                             neighbour_range=config.neighbour_range,
+                                             rank=LOCAL_RANK)
                 
-    if torch.cuda.device_count() > 1 and len(config.gpu_ids) > 1:
+    if config.ddp and LOCAL_RANK==0:
         torch.save(model.module.state_dict(), '{}/weights_end.pth'.format(model_path))
     else:
         torch.save(model.state_dict(), '{}/weights_end.pth'.format(model_path))            
