@@ -162,3 +162,6 @@ cython_debug/
 data/
 pretrained/
 .DS_Store
+
+soundingearth/
+tensorflow_test.py

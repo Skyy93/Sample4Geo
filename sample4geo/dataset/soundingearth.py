@@ -7,12 +7,17 @@ import copy
 import torch
 from tqdm import tqdm
 import time
- 
-class SoundingEarthDatasetEval(Dataset):
+
+from spec_augment import SpecAugment # type: ignore
+from pathlib import Path 
+
+# -> shuffle erstmal ignorieren
+class SoundingEarthDatasetTrain(Dataset):
     
     def __init__(self,
                  data_folder='data/SoundingEarth/data',
-                 transforms_image=None,
+                 split_csv = 'train_df.csv',
+                 transforms_sat_image=None,
                  transforms_spectrogram=None,
                  patch_time_steps=120,
                  sr_kHz=48,
@@ -24,72 +29,86 @@ class SoundingEarthDatasetEval(Dataset):
         
         super().__init__()
 
-        self.data_folder = data_folder
-        self.meta = pd.read_csv(self.data_folder / 'metadata.csv')
+        self.data_folder = Path(data_folder)
+        self.meta = pd.read_csv(str(self.data_folder / split_csv))
 
-        self.prob_flip = prob_flip
-        self.prob_rotate = prob_rotate
-        self.shuffle_batch_size = shuffle_batch_size
+        self.transforms_sat_image = transforms_sat_image       # satellite
+        self.transforms_spectrogram = transforms_spectrogram   # spectrogram
+        self.transforms_spectaugment = SpecAugment(freq_mask_param=12,
+                           time_mask_param=12,
+                           n_freq_mask=20,
+                           n_time_mask=20,
+                           mask_value=-200) 
         
-        self.transforms_image = transforms_image               # satellite
-        self.transforms_spectrogram = transforms_spectrogram   # audio
-
+        self.patch_time_steps = patch_time_steps # Count of datapoints (X-Direction)
         self.sr_kHz = sr_kHz
         self.hop_length = 512
         # hop length: librosa(default) = 512
         # if default: hop_length = win_length//4
         #                          win_length = n_fft
         #                                       n_fft = 2048
-        self.patch_time_steps = patch_time_steps # Count of datapoints (X-Direction)
-        self.time_step == self.hop_length / sr_kHz * 1e3 #  timestep between two datapoints (X-Direction)
+        self.time_step = self.hop_length / sr_kHz * 1e3 #  timestep between two datapoints (X-Direction)
         self.n_mels = n_mels  # Specifies the number of Mel bands (frequency bands) to use in the Mel spectrogram
-                                                
+
+        self.prob_flip = prob_flip
+        self.prob_rotate = prob_rotate
+        self.shuffle_batch_size = shuffle_batch_size
+                                   
     def __getitem__(self, index):
         sample = self.meta.iloc[index]
         key = sample['short_key']
 
-        img = np.array(Image.open(self.data_folder / 'images' / f'{key}.jpg'))
-        img = torch.from_numpy(img).permute(2, 0, 1)
+        img = cv2.imread(str(self.data_folder / 'images' / f'{key}.jpg'))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        audio = np.load(self.root / 'spectrograms' / f'{key}.npy')
+        spectrogram = np.load(self.data_folder / 'spectrograms' / f'{self.n_mels}mel_{self.sr_kHz}kHz' / f'{key}.npy')
 
         # width of the patch = Count of patch_time_steps
         patch_width = self.patch_time_steps
 
         # Check if the spectrogram is wide enough, and add padding if necessary
-        if audio.shape[1] < patch_width:
-            padding_width = patch_width - audio.shape[1]
+        if spectrogram.shape[1] < patch_width:
+            padding_width = patch_width - spectrogram.shape[1]
             # Padding on the right side (along X-axis) to match the required width
-            audio = np.pad(audio, ((0, 0), (0, padding_width)), mode='constant', constant_values=0)
+            spectrogram = np.pad(spectrogram, ((0, 0), (0, padding_width)), mode='constant', constant_values=0)
 
         # Cut a random patch if the spectrogram is wide enough
-        if audio.shape[1] > patch_width:
-            start = torch.randint(0, audio.shape[1] - patch_width + 1, (1,)).item()
+        if spectrogram.shape[1] > patch_width:
+            start = torch.randint(0, spectrogram.shape[1] - patch_width + 1, (1,)).item()
             # Selecting a random start point and cutting out the patch
-            audio = audio[:, start:start + patch_width]
+            spectrogram = spectrogram[:, start:start + patch_width]
 
-        # Add a new axis
-        audio = audio[np.newaxis]
+        # Flip satellite
+        if np.random.random() < self.prob_flip:
+            img = cv2.flip(img, 1)
                        
         # image transforms
-        if self.transforms_image is not None:
-            img = self.transforms_image(image=img)['image']
+        if self.transforms_sat_image is not None:
+            img = self.transforms_sat_image(image=img)['image']
             
         if self.transforms_spectrogram is not None:
-            audio = self.transforms_spectrogram(image=audio)['image']
-                
+            if random.choice([True, False]):
+                spectrogram = self.transforms_spectrogram(image=spectrogram)['image']
+                spectrogram = self.transforms_spectaugment(inputs=spectrogram)
+            else:
+                spectrogram = self.transforms_spectaugment(inputs=spectrogram)
+                spectrogram = self.transforms_spectrogram(image=spectrogram)['image']
+
+         # rotate sat img 90 or 180 or 270
+        if np.random.random() < self.prob_rotate:
+            r = np.random.choice([1,2,3])
+            img = torch.rot90(img, k=r, dims=(1, 2)) 
+
         lon = np.radians(sample.longitude)
         lat = np.radians(sample.latitude)
         coords = torch.from_numpy(np.stack([lat, lon])).float()
+        label = torch.tensor(int(key), dtype=torch.long)  
 
-        return key, img, audio, coords
+        return img, spectrogram, label, coords
     
     def __len__(self):
         return len(self.meta)
         
-
-
-class SoundingEarthDatasetTrain(SoundingEarthDatasetEval):
 
     def shuffle(self, sim_dict=None, neighbour_select=64, neighbour_range=128):
         '''
@@ -180,3 +199,76 @@ class SoundingEarthDatasetTrain(SoundingEarthDatasetEval):
         print("Break Counter:", break_counter)
         print("Pairs left out of last batch to avoid creating noise:", len(self.meta) - len(self.samples))
         print("First Element ID: {} - Last Element ID: {}".format(self.samples[0], self.samples[-1]))
+
+
+class SoundingEarthDatasetEval(Dataset):
+    
+    def __init__(self,
+                 data_folder='data/SoundingEarth/data',
+                 split_csv = 'train_df.csv',
+                 query_type = "sat",
+                 transforms = None,
+                 patch_time_steps=120,
+                 sr_kHz=48,
+                 n_mels=128,
+                 ):
+        
+        super().__init__()
+ 
+        self.data_folder = Path(data_folder)
+        self.meta = pd.read_csv(str(self.data_folder / split_csv))
+        self.query_type = query_type
+
+        self.transforms = transforms     
+
+        # look at SoundingEarthDatasetTrain init for comments
+        self.patch_time_steps = patch_time_steps 
+        self.sr_kHz = sr_kHz
+        self.hop_length = 512
+        self.time_step = self.hop_length / sr_kHz * 1e3 
+        self.n_mels = n_mels  
+           
+        if not ( self.query_type == "sat" or self.query_type == "spectro" ):
+            raise ValueError("Invalid 'query_type' parameter. 'query_type' must be 'sat' or 'spectro'")
+                
+    def __getitem__(self, index):
+
+        sample = self.meta.iloc[index]
+        key = sample['short_key']
+        
+        if self.query_type == "sat":
+            img = cv2.imread(str(self.data_folder / 'images' / f'{key}.jpg'))
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            
+            # image transforms
+            if self.transforms is not None:
+                img = self.transforms(image=img)['image']
+                        
+        else: # if self.query_type == "spectro"
+            img = np.load(self.data_folder / 'spectrograms' / f'{self.n_mels}mel_{self.sr_kHz}kHz' / f'{key}.npy')
+
+            # look at SoundingEarthDatasetTrain getitem for comments
+            patch_width = self.patch_time_steps
+
+            if img.shape[1] < patch_width:
+                padding_width = patch_width - img.shape[1]
+                img = np.pad(img, ((0, 0), (0, padding_width)), mode='constant', constant_values=0)
+            
+            if img.shape[1] > patch_width:
+                start = torch.randint(0, img.shape[1] - patch_width + 1, (1,)).item()
+                img = img[:, start:start + patch_width]
+            
+            img = img[np.newaxis]   
+            
+            if self.transforms is not None:
+                img = self.transforms(image=img)['image']
+
+        lon = np.radians(sample.longitude)
+        lat = np.radians(sample.latitude)
+        coords = torch.from_numpy(np.stack([lat, lon])).float()
+        label = torch.tensor(int(key), dtype=torch.long)  
+
+        return img, label, coords
+    
+    def __len__(self):
+        return len(self.meta)
