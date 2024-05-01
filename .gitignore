@@ -164,4 +164,5 @@ pretrained/
 .DS_Store
 
 soundingearth/
+cvusa/
 tensorflow_test.py

@@ -36,7 +36,6 @@ class TimmModel(nn.Module):
     def forward(self, img1, img2=None):
         
         if img2 is not None:
-       
             image_features1 = self.model(img1)     
             image_features2 = self.model(img2)
             

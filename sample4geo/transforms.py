@@ -91,13 +91,13 @@ def get_transforms_train_spectro(img_size_spectro,
                                 spectro_cutting=0,):
             
     spectro_transforms = A.Compose([Cut(cutting=spectro_cutting, p=1.0),
-                                A.ColorJitter(brightness=0.35, contrast=0.35, saturation=0.35, hue=0.15, always_apply=False, p=1),
+                                A.ColorJitter(brightness=(0, 0.05), contrast=0, saturation=(0,5), hue=(-0.5,0.5), p=1),
                                 A.OneOf([
-                                            A.AdvancedBlur(p=1.0),
-                                            A.Sharpen(p=1.0),
-                                        ], p=0.3),
+                                    A.AdvancedBlur(p=1.0),
+                                    A.GaussianBlur(p=1.0)
+                                ], p=0.3),
                                 A.OneOf([
-                                            A.GridDropout(ratio=0.5, p=1.0),
+                                            A.GridDropout(ratio=0.05, p=1.0),
                                             A.CoarseDropout(max_holes=25,
                                                             max_height=int(0.2*img_size_spectro[0]),
                                                             max_width=int(0.2*img_size_spectro[0]),

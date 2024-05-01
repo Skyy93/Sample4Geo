@@ -8,11 +8,50 @@ import torch
 from tqdm import tqdm
 import time
 
-from spec_augment import SpecAugment # type: ignore
 from pathlib import Path 
+import torchaudio.transforms as T
+import matplotlib.cm as cm
+import torchvision.transforms.functional as TF
+
+# special Augmentations for Spectrograms
+class RandomTorchAudioTransform(torch.nn.Module):
+    def __init__(self):
+        super(RandomTorchAudioTransform, self).__init__()
+        self.time_mask_range = (15, 50)  
+        self.freq_mask_range = (5, 15)  
+
+    def forward(self, spec):
+        time_mask_param = random.randint(*self.time_mask_range)
+        freq_mask_param = random.randint(*self.freq_mask_range)
+        
+        time_masking = T.TimeMasking(time_mask_param=time_mask_param)
+        freq_masking = T.FrequencyMasking(freq_mask_param=freq_mask_param)
+
+        spec = time_masking(spec)
+        spec = freq_masking(spec)
+
+        return spec
+    
+
+# To Convert Spectrogram to "True" 3 Channel Image!
+def apply_viridis_colormap(tensor):
+
+    array = tensor.squeeze().numpy()
+    array = (array - array.min()) / (array.max() - array.min())
+
+    cmap = cm.get_cmap('viridis')
+    rgba_array = cmap(array)
+
+    rgb_array = rgba_array[:, :, :3].transpose((2, 0, 1))
+    output_tensor = torch.tensor(rgb_array, dtype=torch.float)
+
+    return output_tensor
+
 
 # -> shuffle erstmal ignorieren
 class SoundingEarthDatasetTrain(Dataset):
+
+
     
     def __init__(self,
                  data_folder='data/SoundingEarth/data',
@@ -32,13 +71,12 @@ class SoundingEarthDatasetTrain(Dataset):
         self.data_folder = Path(data_folder)
         self.meta = pd.read_csv(str(self.data_folder / split_csv))
 
-        self.transforms_sat_image = transforms_sat_image       # satellite
-        self.transforms_spectrogram = transforms_spectrogram   # spectrogram
-        self.transforms_spectaugment = SpecAugment(freq_mask_param=12,
-                           time_mask_param=12,
-                           n_freq_mask=20,
-                           n_time_mask=20,
-                           mask_value=-200) 
+        # Satellite Image Transformations
+        self.transforms_sat_image = transforms_sat_image  
+
+        # Spectrogram Image Transformations     
+        self.transforms_spectrogram = transforms_spectrogram   
+        self.transforms_spectrogram_torchaudio = RandomTorchAudioTransform() # defined in Class
         
         self.patch_time_steps = patch_time_steps # Count of datapoints (X-Direction)
         self.sr_kHz = sr_kHz
@@ -86,15 +124,18 @@ class SoundingEarthDatasetTrain(Dataset):
         if self.transforms_sat_image is not None:
             img = self.transforms_sat_image(image=img)['image']
             
-        if self.transforms_spectrogram is not None:
-            if random.choice([True, False]):
-                spectrogram = self.transforms_spectrogram(image=spectrogram)['image']
-                spectrogram = self.transforms_spectaugment(inputs=spectrogram)
-            else:
-                spectrogram = self.transforms_spectaugment(inputs=spectrogram)
-                spectrogram = self.transforms_spectrogram(image=spectrogram)['image']
+        spectrogram = torch.from_numpy(spectrogram)
+        #raise(Exception(f'{spectrogram.dtype}'))
 
-         # rotate sat img 90 or 180 or 270
+        if self.transforms_spectrogram is not None:
+            spectrogram = self.transforms_spectrogram_torchaudio(spectrogram)
+            spectrogram = spectrogram.numpy()
+            spectrogram = self.transforms_spectrogram(image=spectrogram)['image']
+
+        # Apply the Viridis colormap
+        spectrogram = apply_viridis_colormap(spectrogram)
+
+        # rotate sat img 90 or 180 or 270
         if np.random.random() < self.prob_rotate:
             r = np.random.choice([1,2,3])
             img = torch.rot90(img, k=r, dims=(1, 2)) 
@@ -104,7 +145,7 @@ class SoundingEarthDatasetTrain(Dataset):
         coords = torch.from_numpy(np.stack([lat, lon])).float()
         label = torch.tensor(int(key), dtype=torch.long)  
 
-        return img, spectrogram, label, coords
+        return img, spectrogram, label #, coords
     
     def __len__(self):
         return len(self.meta)
@@ -257,18 +298,19 @@ class SoundingEarthDatasetEval(Dataset):
             if img.shape[1] > patch_width:
                 start = torch.randint(0, img.shape[1] - patch_width + 1, (1,)).item()
                 img = img[:, start:start + patch_width]
-            
-            img = img[np.newaxis]   
-            
+                        
             if self.transforms is not None:
                 img = self.transforms(image=img)['image']
+            
+            # Apply the Viridis colormap
+            spectrogram = apply_viridis_colormap(spectrogram)
 
         lon = np.radians(sample.longitude)
         lat = np.radians(sample.latitude)
         coords = torch.from_numpy(np.stack([lat, lon])).float()
         label = torch.tensor(int(key), dtype=torch.long)  
 
-        return img, label, coords
+        return img, label #, coords
     
     def __len__(self):
         return len(self.meta)

@@ -40,7 +40,7 @@ class Configuration:
     mixed_precision: bool = True
     seed = 42
     epochs: int = 40
-    batch_size: int = 128        # keep in mind real_batch_size = 2 * batch_size
+    batch_size: int = 32         # keep in mind real_batch_size = 2 * batch_size
     verbose: bool = True
     gpu_ids: tuple = (0,1,2,3)   # GPU ids for training
     
@@ -142,7 +142,7 @@ if __name__ == '__main__':
     std = data_config["std"]
     img_size = config.img_size
     
-    image_size_sat = (img_size, img_size)
+    img_size_sat = (img_size, img_size)
     img_size_spectro = (config.patch_time_steps, config.n_mels)
     
     # Activate gradient checkpointing
@@ -163,7 +163,7 @@ if __name__ == '__main__':
     # Model to device   
     model = model.to(config.device)
 
-    print("\nImage Size Sat:", image_size_sat)
+    print("\nImage Size Sat:", img_size_sat)
     print("Image Size Spectro:", img_size_spectro)
     print("Mean: {}".format(mean))
     print("Std:  {}\n".format(std)) 
@@ -174,7 +174,7 @@ if __name__ == '__main__':
     #-----------------------------------------------------------------------------#
 
     # Transforms
-    sat_transforms_train = get_transforms_train_sat(image_size_sat,
+    sat_transforms_train = get_transforms_train_sat(img_size_sat,
                                                                    mean=mean,
                                                                    std=std,
                                                                    )
@@ -207,7 +207,7 @@ if __name__ == '__main__':
     
     
     # Eval
-    sat_transforms_val = get_transforms_val_sat(image_size_sat,
+    sat_transforms_val = get_transforms_val_sat(img_size_sat,
                                                                mean=mean,
                                                                std=std,
                                                                )
@@ -237,7 +237,7 @@ if __name__ == '__main__':
     
     
     # Reference Spectogram Images
-    query_dataset_test = SoundingEarthDatasetEval(data_folder=config.data_folder ,
+    spectro_dataset_test = SoundingEarthDatasetEval(data_folder=config.data_folder ,
                                       split_csv='test_df.csv',
                                       query_type = "spectro",
                                       transforms=spectro_transforms_val,
@@ -246,7 +246,7 @@ if __name__ == '__main__':
                                       n_mels=config.n_mels,
                                       )
     
-    query_dataloader_test = DataLoader(query_dataset_test,
+    spectro_dataloader_test = DataLoader(spectro_dataset_test,
                                        batch_size=config.batch_size_eval,
                                        num_workers=config.num_workers,
                                        shuffle=False,
@@ -254,7 +254,7 @@ if __name__ == '__main__':
     
     
     print("Reference (Sat) Images Test:", len(sat_dataset_test))
-    print("Reference (Spectro) Images Test:", len(query_dataset_test))
+    print("Reference (Spectro) Images Test:", len(spectro_dataset_test))
     
     
     #-----------------------------------------------------------------------------#
@@ -388,7 +388,7 @@ if __name__ == '__main__':
         r1_test = evaluate(config=config,
                            model=model,
                            reference_dataloader=sat_dataloader_test,
-                           query_dataloader=query_dataloader_test, 
+                           query_dataloader=spectro_dataloader_test, 
                            ranks=[1, 5, 10],
                            step_size=1000,
                            cleanup=True)
@@ -442,7 +442,7 @@ if __name__ == '__main__':
             r1_test = evaluate(config=config,
                                model=model,
                                reference_dataloader=sat_dataloader_test,
-                               query_dataloader=query_dataloader_test, 
+                               query_dataloader=spectro_dataloader_test, 
                                ranks=[1, 5, 10],
                                step_size=1000,
                                cleanup=True)

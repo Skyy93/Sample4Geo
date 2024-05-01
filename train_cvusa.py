@@ -11,7 +11,8 @@ from torch.utils.data import DataLoader
 from transformers import get_constant_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup, get_cosine_schedule_with_warmup
 
 from sample4geo.dataset.cvusa import CVUSADatasetEval, CVUSADatasetTrain
-from sample4geo.transforms import get_transforms_train, get_transforms_val
+from sample4geo.transforms import get_transforms_train_sat, get_transforms_val_sat
+from sample4geo.transforms import get_transforms_train_ground, get_transforms_val_ground
 from sample4geo.utils import setup_system, Logger
 from sample4geo.trainer import train
 from sample4geo.evaluate.cvusa_and_cvact import evaluate, calc_sim
@@ -32,7 +33,7 @@ class Configuration:
     mixed_precision: bool = True
     seed = 42
     epochs: int = 40
-    batch_size: int = 128        # keep in mind real_batch_size = 2 * batch_size
+    batch_size: int = 32        # keep in mind real_batch_size = 2 * batch_size
     verbose: bool = True
     gpu_ids: tuple = (0,1,2,3)   # GPU ids for training
     
@@ -170,8 +171,12 @@ if __name__ == '__main__':
     #-----------------------------------------------------------------------------#
 
     # Transforms
-    sat_transforms_train, ground_transforms_train = get_transforms_train(image_size_sat,
-                                                                   img_size_ground,
+    sat_transforms_train = get_transforms_train_sat(image_size_sat,
+                                                                   mean=mean,
+                                                                   std=std,
+                                                                   )
+    
+    ground_transforms_train = get_transforms_train_ground(img_size_ground,
                                                                    mean=mean,
                                                                    std=std,
                                                                    )
@@ -195,8 +200,13 @@ if __name__ == '__main__':
     
     
     # Eval
-    sat_transforms_val, ground_transforms_val = get_transforms_val(image_size_sat,
-                                                               img_size_ground,
+    sat_transforms_val = get_transforms_val_sat(image_size_sat,
+                                                               mean=mean,
+                                                               std=std,
+                                                               )
+    
+
+    ground_transforms_val = get_transforms_val_ground(img_size_ground,
                                                                mean=mean,
                                                                std=std,
                                                                )
