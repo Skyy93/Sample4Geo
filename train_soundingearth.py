@@ -19,7 +19,7 @@ from sample4geo.transforms import get_transforms_val_sat, get_transforms_val_spe
 
 from sample4geo.utils import setup_system, Logger
 from sample4geo.trainer import train
-from sample4geo.evaluate.cvusa_and_cvact import evaluate, calc_sim
+from sample4geo.evaluate.soundingearth import evaluate, calc_sim
 from sample4geo.loss import InfoNCE
 from sample4geo.model import TimmModel
 
@@ -32,7 +32,7 @@ class Configuration:
     
     # Override model image size
     img_size: int = 384         # for satallite images
-    patch_time_steps = 512      # Image size for spectograms (Width)
+    patch_time_steps = 1024     # Image size for spectograms (Width)
     n_mels = 128                # image size for spectograms (Height)
     sr_kHz=48
     
@@ -40,9 +40,9 @@ class Configuration:
     mixed_precision: bool = True
     seed = 42
     epochs: int = 40
-    batch_size: int = 32         # keep in mind real_batch_size = 2 * batch_size
+    batch_size: int = 48         # keep in mind real_batch_size = 2 * batch_size
     verbose: bool = True
-    gpu_ids: tuple = (0,1,2,3)   # GPU ids for training
+    gpu_ids: tuple = (0,1,2,3,4,5,6,7)   # GPU ids for training
     
     
     # Similarity Sampling
@@ -180,8 +180,8 @@ if __name__ == '__main__':
                                                                    )
     
     spectro_transforms_train = get_transforms_train_spectro(img_size_spectro,
-                                                                   mean=[11.619702],        # calculated from 
-                                                                   std=[0.4910788],         #                 spectrogram data
+                                                                   mean=mean,       
+                                                                   std=std,       
                                                                    )
                                                                    
                                                                    
@@ -213,9 +213,9 @@ if __name__ == '__main__':
                                                                )
     
     spectro_transforms_val = get_transforms_val_spectro(img_size_spectro,
-                                                               mean=[11.619702],        # calculated from 
-                                                               std=[0.4910788],         #                 spectrogram data
-                                                               )
+                                                               mean=mean,       
+                                                               std=std
+                                                                )        
 
 
     # Reference Satellite Images
