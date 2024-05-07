@@ -1,6 +1,5 @@
 import os
 import time
-import math
 import shutil
 import sys
 import torch
@@ -10,18 +9,18 @@ from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader
 from transformers import get_constant_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup, get_cosine_schedule_with_warmup
 
-from sample4geo.dataset.cvusa import CVUSADatasetEval, CVUSADatasetTrain
+from spectrum4geo.dataset.cvusa import CVUSADatasetEval, CVUSADatasetTrain
 
-from sample4geo.dataset.soundingearth import SoundingEarthDatasetEval, SoundingEarthDatasetTrain
-from sample4geo.transforms import get_transforms_train_sat, get_transforms_train_spectro 
-from sample4geo.transforms import get_transforms_val_sat, get_transforms_val_spectro 
+from spectrum4geo.dataset.soundingearth import SoundingEarthDatasetEval, SoundingEarthDatasetTrain
+from spectrum4geo.transforms import get_transforms_train_sat, get_transforms_train_spectro 
+from spectrum4geo.transforms import get_transforms_val_sat, get_transforms_val_spectro 
 
 
-from sample4geo.utils import setup_system, Logger
-from sample4geo.trainer import train
-from sample4geo.evaluate.soundingearth import evaluate, calc_sim
-from sample4geo.loss import InfoNCE
-from sample4geo.model import TimmModel
+from spectrum4geo.utils import setup_system, Logger
+from spectrum4geo.trainer import train
+from spectrum4geo.evaluate.soundingearth import evaluate, calc_sim
+from spectrum4geo.loss import InfoNCE
+from spectrum4geo.model import TimmModel
 
 
 @dataclass
@@ -32,7 +31,7 @@ class Configuration:
     
     # Override model image size
     img_size: int = 384         # for satallite images
-    patch_time_steps = 1024     # Image size for spectograms (Width)
+    patch_time_steps = 1024*2      # Image size for spectograms (Width)
     n_mels = 128                # image size for spectograms (Height)
     sr_kHz=48
     
@@ -51,7 +50,7 @@ class Configuration:
     sim_sample: bool = False        # use similarity sampling                   -> To False for not using shuffle function of dataloader!
     neighbour_select: int = 64     # max selection size from pool
     neighbour_range: int = 128     # pool size for selection
-    gps_dict_path: str = "data/SoundingEarth/gps_dict.pkl"   # path to pre-computed distances
+    gps_dict_path: str = "data/gps_dict.pkl"   # path to pre-computed distances
  
     # Eval
     batch_size_eval: int = 128
@@ -73,7 +72,7 @@ class Configuration:
     lr_end: float = 0.0001             #  only for "polynomial"
     
     # Dataset
-    data_folder = "data/SoundingEarth/data"     
+    data_folder = "data"     
     
     # Augment Images
     prob_rotate: float = 0.75          # rotates the sat image 
@@ -212,15 +211,14 @@ if __name__ == '__main__':
                                                                std=std,
                                                                )
     
-    spectro_transforms_val = get_transforms_val_spectro(img_size_spectro,
-                                                               mean=mean,       
+    spectro_transforms_val = get_transforms_val_spectro(mean=mean,       
                                                                std=std
                                                                 )        
 
 
     # Reference Satellite Images
     sat_dataset_test = SoundingEarthDatasetEval(data_folder=config.data_folder ,
-                                      split_csv='test_df.csv',
+                                      split_csv='validate_df.csv',
                                       query_type = "sat",
                                       transforms=sat_transforms_val,
                                       patch_time_steps=config.patch_time_steps,
@@ -238,7 +236,7 @@ if __name__ == '__main__':
     
     # Reference Spectogram Images
     spectro_dataset_test = SoundingEarthDatasetEval(data_folder=config.data_folder ,
-                                      split_csv='test_df.csv',
+                                      split_csv='validate_df.csv',
                                       query_type = "spectro",
                                       transforms=spectro_transforms_val,
                                       patch_time_steps=config.patch_time_steps,

@@ -3,10 +3,10 @@ import torch
 from dataclasses import dataclass
 
 from torch.utils.data import DataLoader
-from sample4geo.dataset.cvusa import CVUSADatasetEval
-from sample4geo.transforms import get_transforms_val
-from sample4geo.evaluate.cvusa_and_cvact import evaluate
-from sample4geo.model import TimmModel
+from spectrum4geo.dataset.cvusa import CVUSADatasetEval
+from spectrum4geo.transforms import get_transforms_val
+from spectrum4geo.evaluate.cvusa_and_cvact import evaluate
+from spectrum4geo.model import TimmModel
 
 
 @dataclass

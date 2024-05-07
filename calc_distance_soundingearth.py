@@ -9,12 +9,12 @@ import pickle
 TOP_K = 128
 
 # Load data
-df_train = pd.read_csv('data/SoundingEarth/data/train_df.csv')
+df_train = pd.read_csv('data/train_df.csv')
 train_ids = df_train["short_key"].tolist()
 
 print("Length Train Ids:", len(train_ids))
 
-df_gps = pd.read_csv('data/SoundingEarth/data/final_metadata_with_captions.csv')
+df_gps = pd.read_csv('data/final_metadata.csv')
 df_gps.set_index('short_key', inplace=True)
 
 # Prepare GPS coordinates
@@ -54,5 +54,5 @@ for i, idx in enumerate(train_ids):
     near_neighbors[idx] = [train_ids[j] for j in indices_for_i]
 
 print("Saving...") 
-with open("./data/SoundingEarth/gps_dict.pkl", "wb") as f:
+with open("./data/gps_dict.pkl", "wb") as f:
     pickle.dump(near_neighbors, f)
