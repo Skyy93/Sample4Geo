@@ -12,29 +12,13 @@ from pathlib import Path
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 
-# To Convert Spectrogram to "True" 3 Channel Image!
-def apply_viridis_colormap(array):
-
-    #array = (array - array.min()) / (array.max() - array.min())
-    norm = plt.Normalize(vmin=array.min(), vmax=array.max())
-    cmap = cm.get_cmap('viridis')
-
-    rgba_array = cmap(norm(array)).astype(np.float32)
-    rgb_array = rgba_array[:, :, :3]
-
-    return rgb_array
-
 # -> shuffle erstmal ignorieren
-class SoundingEarthDatasetTrain(Dataset):
+class Wav2VecSoundingEarthDatasetTrain(Dataset):
 
     def __init__(self,
                  data_folder='data',
                  split_csv = 'train_df.csv',
                  transforms_sat_image=None,
-                 transforms_spectrogram=None,
-                 patch_time_steps=120,
-                 sr_kHz=48,
-                 n_mels=128,
                  prob_flip=0.0,
                  prob_rotate=0.0,
                  shuffle_batch_size=128,
@@ -47,19 +31,6 @@ class SoundingEarthDatasetTrain(Dataset):
 
         # Satellite Image Transformations
         self.transforms_sat_image = transforms_sat_image  
-
-        # Spectrogram Image Transformations     
-        self.transforms_spectrogram = transforms_spectrogram   
-        
-        self.patch_time_steps = patch_time_steps # Count of datapoints (X-Direction)
-        self.sr_kHz = sr_kHz
-        self.hop_length = 512
-        # hop length: librosa(default) = 512
-        # if default: hop_length = win_length//4
-        #                          win_length = n_fft
-        #                                       n_fft = 2048
-        self.time_step = self.hop_length / sr_kHz * 1e3 #  timestep between two datapoints (X-Direction)
-        self.n_mels = n_mels  # Specifies the number of Mel bands (frequency bands) to use in the Mel spectrogram
 
         self.prob_flip = prob_flip
         self.prob_rotate = prob_rotate
@@ -85,51 +56,15 @@ class SoundingEarthDatasetTrain(Dataset):
             r = np.random.choice([1,2,3])
             img = torch.rot90(img, k=r, dims=(1, 2)) 
 
-        spectrogram = np.load(self.data_folder / 'spectrograms' / f'{self.n_mels}mel_{self.sr_kHz}kHz' / f'{key}.npy')
 
-        # width of the patch = Count of patch_time_steps
-        patch_width = self.patch_time_steps
-
-        # Check if the spectrogram is wide enough, and add padding if necessary
-        if spectrogram.shape[1] < patch_width:
-            padding_width = patch_width - spectrogram.shape[1]
-            # Padding on the right side (along X-axis) to match the required width
-            spectrogram = np.pad(spectrogram, ((0, 0), (0, padding_width)), mode='constant', constant_values=-100) # Assumption: -100 dB is considered silence
-
-        # Cut a random patch if the spectrogram is wide enough
-        if spectrogram.shape[1] > patch_width:
-            start = torch.randint(0, spectrogram.shape[1] - patch_width + 1, (1,)).item()
-            # Selecting a random start point and cutting out the patch
-            spectrogram = spectrogram[:, start:start + patch_width]
-    
-        # spectrogram = librosa.power_to_db(spectrogram, ref=np.max) # only if data isnt in dB, important: change padded values above!
-        
-        # Apply the Viridis colormap
-        #with warnings.catch_warnings():
-        #    warnings.filterwarnings('error', category=RuntimeWarning)  #
-        #    try:
-        #        spectrogram_back = spectrogram
-        #        spectrogram = apply_viridis_colormap(spectrogram)
-        #    except RuntimeWarning as rw:
-        #        log_warning(f'{rw}   :  {key}.npy', 'train_dataloader_warnings.txt')
-        #        spectrogram = None
-        #
-        #if spectrogram is None:    
-
-        spectrogram = apply_viridis_colormap(spectrogram)#_back)
-
-        if self.transforms_spectrogram is not None:
-            spectrogram = self.transforms_spectrogram(image=spectrogram)['image']
-        else:
-            spectrogram = torch.from_numpy(spectrogram)
-            spectrogram = spectrogram.permute(2, 0, 1)
+        wav = torch.load(str(self.data_folder / 'raw_audio_tensors' / f'{key}.pt'))
 
         lon = np.radians(sample.longitude)
         lat = np.radians(sample.latitude)
         coords = torch.from_numpy(np.stack([lat, lon])).float()
         label = torch.tensor(int(key), dtype=torch.long)  
 
-        return img, spectrogram, label #, coords
+        return img, wav, label #, coords
     
     def __len__(self):
         return len(self.meta)
@@ -226,16 +161,13 @@ class SoundingEarthDatasetTrain(Dataset):
         print("First Element ID: {} - Last Element ID: {}".format(self.samples[0], self.samples[-1]))
 
 
-class SoundingEarthDatasetEval(Dataset):
+class Wav2VecSoundingEarthDatasetEval(Dataset):
     
     def __init__(self,
                  data_folder='data',
                  split_csv = 'valid_df.csv',
                  query_type = "sat",
                  transforms = None,
-                 patch_time_steps=120,
-                 sr_kHz=48,
-                 n_mels=128,
                  ):
         
         super().__init__()
@@ -245,16 +177,9 @@ class SoundingEarthDatasetEval(Dataset):
         self.query_type = query_type
 
         self.transforms = transforms     
-
-        # look at SoundingEarthDatasetTrain init for comments
-        self.patch_time_steps = patch_time_steps 
-        self.sr_kHz = sr_kHz
-        self.hop_length = 512
-        self.time_step = self.hop_length / sr_kHz * 1e3 
-        self.n_mels = n_mels  
            
-        if not ( self.query_type == "sat" or self.query_type == "spectro" ):
-            raise ValueError("Invalid 'query_type' parameter. 'query_type' must be 'sat' or 'spectro'")
+        if not ( self.query_type == "sat" or self.query_type == "wav" ):
+            raise ValueError("Invalid 'query_type' parameter. 'query_type' must be 'sat' or 'wav'")
                 
     def __getitem__(self, index):
 
@@ -262,55 +187,23 @@ class SoundingEarthDatasetEval(Dataset):
         key = sample['short_key']
         
         if self.query_type == "sat":
-            img = cv2.imread(str(self.data_folder / 'images' / f'{key}.jpg'))
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            item = cv2.imread(str(self.data_folder / 'images' / f'{key}.jpg'))
+            item = cv2.cvtColor(item, cv2.COLOR_BGR2RGB)
             
             # image transforms
             if self.transforms is not None:
-                img = self.transforms(image=img)['image']
+                item = self.transforms(image=item)['image']
                         
         else: # if self.query_type == "spectro"
-            img = np.load(self.data_folder / 'spectrograms' / f'{self.n_mels}mel_{self.sr_kHz}kHz' / f'{key}.npy')
 
-            # look at SoundingEarthDatasetTrain getitem for comments
-            patch_width = self.patch_time_steps
-
-            if img.shape[1] < patch_width:
-                padding_width = patch_width - img.shape[1]
-                img = np.pad(img, ((0, 0), (0, padding_width)), mode='constant', constant_values=-100) # Assumption: -100 dB is considered silence
-            
-            if img.shape[1] > patch_width:
-                start = torch.randint(0, img.shape[1] - patch_width + 1, (1,)).item()
-                img = img[:, start:start + patch_width]
-                        
-            # img = librosa.power_to_db(img, ref=np.max) # only if data isnt in dB, important: change padded values above!
-
-            # Apply the Viridis colormap
-            #with warnings.catch_warnings():
-            #    warnings.filterwarnings('error', category=RuntimeWarning)  #
-            #    try:
-            #        img_back = img
-            #        img = apply_viridis_colormap(img)
-            #    except RuntimeWarning as rw:
-            #        log_warning(f'{rw}   :  {key}.npy', 'test_dataloader_warnings.txt')
-            #        img = None
-            #
-            #if img is None: 
-
-            img = apply_viridis_colormap(img)#_back)
-
-            if self.transforms is not None:
-                img = self.transforms(image=img)['image']
-            else:
-                img = torch.from_numpy(img)
-                img = img.permute(2, 0, 1)
+            item = torch.load(str(self.data_folder / 'raw_audio_tensors' / f'{key}.pt'))
 
         lon = np.radians(sample.longitude)
         lat = np.radians(sample.latitude)
         coords = torch.from_numpy(np.stack([lat, lon])).float()
         label = torch.tensor(int(key), dtype=torch.long)  
 
-        return img, label #, coords
+        return item, label #, coords
     
     def __len__(self):
         return len(self.meta)

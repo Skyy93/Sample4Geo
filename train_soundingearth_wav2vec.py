@@ -28,10 +28,11 @@ class Configuration:
     
     # Model
     model: str = 'convnext_base.fb_in22k_ft_in1k_384' 
+    model_wav2vec: str = 'facebook/wav2vec2-base-960h'
     
     # Override model image size
     img_size: int = 384         # for satallite images
-    patch_time_steps = 1024      # Image size for spectograms (Width)
+    patch_time_steps = 1024*2      # Image size for spectograms (Width)
     n_mels = 128                # image size for spectograms (Height)
     sr_kHz=48
     
