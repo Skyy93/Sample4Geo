@@ -93,11 +93,14 @@ class SoundingEarthDatasetTrain(Dataset):
         # Check if the spectrogram is wide enough, and add padding if necessary
         if spectrogram.shape[1] < patch_width:
             padding_width = patch_width - spectrogram.shape[1]
-            # Padding on the right side (along X-axis) to match the required width
-            spectrogram = np.pad(spectrogram, ((0, 0), (0, padding_width)), mode='constant', constant_values=-100) # Assumption: -100 dB is considered silence
+            # Randomly determining the padding distribution
+            left_padding = np.random.randint(0, padding_width + 1)
+            right_padding = padding_width - left_padding
+            # Padding on both left and right sides (along the X-axis) to achieve the required width
+            spectrogram = np.pad(spectrogram, ((0, 0), (left_padding, right_padding)), mode='constant', constant_values=-60) # Assumption: -60 dB is considered silence
 
         # Cut a random patch if the spectrogram is wide enough
-        if spectrogram.shape[1] > patch_width:
+        elif spectrogram.shape[1] > patch_width:
             start = torch.randint(0, spectrogram.shape[1] - patch_width + 1, (1,)).item()
             # Selecting a random start point and cutting out the patch
             spectrogram = spectrogram[:, start:start + patch_width]
@@ -275,11 +278,12 @@ class SoundingEarthDatasetEval(Dataset):
             # look at SoundingEarthDatasetTrain getitem for comments
             patch_width = self.patch_time_steps
 
+            # for Eval only padding on rigth side
             if img.shape[1] < patch_width:
                 padding_width = patch_width - img.shape[1]
-                img = np.pad(img, ((0, 0), (0, padding_width)), mode='constant', constant_values=-100) # Assumption: -100 dB is considered silence
+                img = np.pad(img, ((0, 0), (0, padding_width)), mode='constant', constant_values=-60) # Assumption: -60 dB is considered silence
             
-            if img.shape[1] > patch_width:
+            elif img.shape[1] > patch_width:
                 start = torch.randint(0, img.shape[1] - patch_width + 1, (1,)).item()
                 img = img[:, start:start + patch_width]
                         

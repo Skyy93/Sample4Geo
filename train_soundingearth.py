@@ -9,19 +9,14 @@ from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader
 from transformers import get_constant_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup, get_cosine_schedule_with_warmup
 
-from spectrum4geo.dataset.cvusa import CVUSADatasetEval, CVUSADatasetTrain
-
 from spectrum4geo.dataset.soundingearth import SoundingEarthDatasetEval, SoundingEarthDatasetTrain
-from spectrum4geo.transforms import get_transforms_train_sat, get_transforms_train_spectro 
-from spectrum4geo.transforms import get_transforms_val_sat, get_transforms_val_spectro 
-
-
+from spectrum4geo.transforms_ver1 import get_transforms_train_sat, get_transforms_train_spectro 
+from spectrum4geo.transforms_ver1 import get_transforms_val_sat, get_transforms_val_spectro 
 from spectrum4geo.utils import setup_system, Logger
 from spectrum4geo.trainer import train
 from spectrum4geo.evaluate.soundingearth import evaluate, calc_sim
 from spectrum4geo.loss import InfoNCE
 from spectrum4geo.model import TimmModel
-
 
 @dataclass
 class Configuration:
@@ -31,17 +26,17 @@ class Configuration:
     
     # Override model image size
     img_size: int = 384         # for satallite images
-    patch_time_steps = 1024      # Image size for spectograms (Width)
+    patch_time_steps = 1024     # Image size for spectograms (Width)
     n_mels = 128                # image size for spectograms (Height)
-    sr_kHz=48
+    sr_kHz = 16
     
     # Training 
     mixed_precision: bool = True
     seed = 42
     epochs: int = 40
-    batch_size: int = 48         # keep in mind real_batch_size = 2 * batch_size
+    batch_size: int = 48           # keep in mind real_batch_size = 2 * batch_size
     verbose: bool = True
-    gpu_ids: tuple = (0,1,2,3,4,5,6,7)   # GPU ids for training
+    gpu_ids: tuple = (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)   # GPU ids for training
     
     
     # Similarity Sampling
@@ -53,7 +48,7 @@ class Configuration:
     gps_dict_path: str = "data/gps_dict.pkl"   # path to pre-computed distances
  
     # Eval
-    batch_size_eval: int = 128
+    batch_size_eval: int = 64
     eval_every_n_epoch: int = 4        # eval every n Epoch
     normalize_features: bool = True
 
@@ -158,7 +153,13 @@ if __name__ == '__main__':
     print("GPUs available:", torch.cuda.device_count())  
     if torch.cuda.device_count() > 1 and len(config.gpu_ids) > 1:
         model = torch.nn.DataParallel(model, device_ids=config.gpu_ids)
-            
+
+    # Print information about Spectogram settings
+    print(f"\nSpectrogram details:\n"
+          f"\tSample rate: {config.sr_kHz} kHz\n"
+          f"\tn_mels: {config.n_mels}\n"
+          f"\tPatch width (time steps): {config.patch_time_steps}")     
+           
     # Model to device   
     model = model.to(config.device)
 
@@ -387,7 +388,7 @@ if __name__ == '__main__':
                            model=model,
                            reference_dataloader=sat_dataloader_test,
                            query_dataloader=spectro_dataloader_test, 
-                           ranks=[1, 5, 10],
+                           ranks=[1, 5, 10, 50, 100],
                            step_size=1000,
                            cleanup=True)
         
@@ -396,7 +397,7 @@ if __name__ == '__main__':
                                           model=model,
                                           reference_dataloader=sat_dataloader_train,
                                           query_dataloader=spectro_dataloader_train, 
-                                          ranks=[1, 5, 10],
+                                          ranks=[1, 5, 10, 50, 100],
                                           step_size=1000,
                                           cleanup=True)
                 
@@ -441,7 +442,7 @@ if __name__ == '__main__':
                                model=model,
                                reference_dataloader=sat_dataloader_test,
                                query_dataloader=spectro_dataloader_test, 
-                               ranks=[1, 5, 10],
+                               ranks=[1, 5, 10, 50, 100],
                                step_size=1000,
                                cleanup=True)
             
@@ -450,7 +451,7 @@ if __name__ == '__main__':
                                               model=model,
                                               reference_dataloader=sat_dataloader_train,
                                               query_dataloader=spectro_dataloader_train, 
-                                              ranks=[1, 5, 10],
+                                              ranks=[1, 5, 10, 50, 100],
                                               step_size=1000,
                                               cleanup=True)
                 

@@ -9,18 +9,16 @@ from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader
 from transformers import get_constant_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup, get_cosine_schedule_with_warmup
 
-from spectrum4geo.dataset.cvusa import CVUSADatasetEval, CVUSADatasetTrain
-
-from spectrum4geo.dataset.soundingearth import SoundingEarthDatasetEval, SoundingEarthDatasetTrain
-from spectrum4geo.transforms import get_transforms_train_sat, get_transforms_train_spectro 
-from spectrum4geo.transforms import get_transforms_val_sat, get_transforms_val_spectro 
+from spectrum4geo.dataset.soundingearth_wav2vec import Wav2VecSoundingEarthDatasetTrain, Wav2VecSoundingEarthDatasetEval
+from spectrum4geo.transforms_ver2 import get_transforms_train_sat 
+from spectrum4geo.transforms_ver2 import get_transforms_val_sat
 
 
 from spectrum4geo.utils import setup_system, Logger
 from spectrum4geo.trainer import train
 from spectrum4geo.evaluate.soundingearth import evaluate, calc_sim
 from spectrum4geo.loss import InfoNCE
-from spectrum4geo.model import TimmModel
+from spectrum4geo.model import TimmModelWav2Vec
 
 
 @dataclass
@@ -32,9 +30,6 @@ class Configuration:
     
     # Override model image size
     img_size: int = 384         # for satallite images
-    patch_time_steps = 1024*2      # Image size for spectograms (Width)
-    n_mels = 128                # image size for spectograms (Height)
-    sr_kHz=48
     
     # Training 
     mixed_precision: bool = True
@@ -42,7 +37,7 @@ class Configuration:
     epochs: int = 40
     batch_size: int = 48         # keep in mind real_batch_size = 2 * batch_size
     verbose: bool = True
-    gpu_ids: tuple = (0,1,2,3,4,5,6,7)   # GPU ids for training
+    gpu_ids: tuple = (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)   # GPU ids for training
     
     
     # Similarity Sampling
@@ -132,7 +127,8 @@ if __name__ == '__main__':
     print("\nModel: {}".format(config.model))
 
 
-    model = TimmModel(config.model,
+    model = TimmModelWav2Vec(config.model,
+                      config.model_wav2vec,
                       pretrained=True,
                       img_size=config.img_size)     # no image size needed, this wis more important for an implementation of an ViT
                           
@@ -143,7 +139,6 @@ if __name__ == '__main__':
     img_size = config.img_size
     
     img_size_sat = (img_size, img_size)
-    img_size_spectro = (config.patch_time_steps, config.n_mels)
     
     # Activate gradient checkpointing
     if config.grad_checkpointing:
@@ -164,7 +159,6 @@ if __name__ == '__main__':
     model = model.to(config.device)
 
     print("\nImage Size Sat:", img_size_sat)
-    print("Image Size Spectro:", img_size_spectro)
     print("Mean: {}".format(mean))
     print("Std:  {}\n".format(std)) 
 
@@ -178,25 +172,16 @@ if __name__ == '__main__':
                                                                    mean=mean,
                                                                    std=std,
                                                                    )
-    
-    spectro_transforms_train = get_transforms_train_spectro(img_size_spectro,
-                                                                   mean=mean,       
-                                                                   std=std,       
-                                                                   )
                                                                    
                                                                    
     # Train
-    train_dataset = SoundingEarthDatasetTrain(data_folder=config.data_folder ,
-                                      split_csv='train_df.csv',
-                                      transforms_sat_image=sat_transforms_train,
-                                      transforms_spectrogram=spectro_transforms_train,
-                                      patch_time_steps=config.patch_time_steps,
-                                      sr_kHz=config.sr_kHz,
-                                      n_mels=config.n_mels,
-                                      prob_flip=config.prob_flip,
-                                      prob_rotate=config.prob_rotate,
-                                      shuffle_batch_size=config.batch_size
-                                      )
+    train_dataset = Wav2VecSoundingEarthDatasetTrain(data_folder=config.data_folder ,
+                                            split_csv='train_df.csv',
+                                            transforms_sat_image=sat_transforms_train,
+                                            prob_flip=config.prob_flip,
+                                            prob_rotate=config.prob_rotate,
+                                            shuffle_batch_size=config.batch_size
+                                            )
     
     
     train_dataloader = DataLoader(train_dataset,
@@ -208,24 +193,18 @@ if __name__ == '__main__':
     
     # Eval
     sat_transforms_val = get_transforms_val_sat(img_size_sat,
-                                                               mean=mean,
-                                                               std=std,
-                                                               )
-    
-    spectro_transforms_val = get_transforms_val_spectro(mean=mean,       
-                                                               std=std
-                                                                )        
+                                            mean=mean,
+                                            std=std,
+                                            )
+          
 
 
     # Reference Satellite Images
-    sat_dataset_test = SoundingEarthDatasetEval(data_folder=config.data_folder ,
-                                      split_csv='validate_df.csv',
-                                      query_type = "sat",
-                                      transforms=sat_transforms_val,
-                                      patch_time_steps=config.patch_time_steps,
-                                      sr_kHz=config.sr_kHz,
-                                      n_mels=config.n_mels,
-                                      )
+    sat_dataset_test = Wav2VecSoundingEarthDatasetEval(data_folder=config.data_folder ,
+                                            split_csv='validate_df.csv',
+                                            query_type = "sat",
+                                            transforms=sat_transforms_val,
+                                            )
     
     sat_dataloader_test = DataLoader(sat_dataset_test,
                                            batch_size=config.batch_size_eval,
@@ -234,18 +213,14 @@ if __name__ == '__main__':
                                            pin_memory=True)
     
     
-    
     # Reference Spectogram Images
-    spectro_dataset_test = SoundingEarthDatasetEval(data_folder=config.data_folder ,
+    audio_dataset_test = Wav2VecSoundingEarthDatasetEval(data_folder=config.data_folder ,
                                       split_csv='validate_df.csv',
-                                      query_type = "spectro",
-                                      transforms=spectro_transforms_val,
-                                      patch_time_steps=config.patch_time_steps,
-                                      sr_kHz=config.sr_kHz,
-                                      n_mels=config.n_mels,
+                                      query_type = "audio",
+                                      transforms=None
                                       )
     
-    spectro_dataloader_test = DataLoader(spectro_dataset_test,
+    audio_dataloader_test = DataLoader(audio_dataset_test,
                                        batch_size=config.batch_size_eval,
                                        num_workers=config.num_workers,
                                        shuffle=False,
@@ -253,7 +228,7 @@ if __name__ == '__main__':
     
     
     print("Reference (Sat) Images Test:", len(sat_dataset_test))
-    print("Reference (Spectro) Images Test:", len(spectro_dataset_test))
+    print("Reference (Audio) Wav2Vec Test:", len(audio_dataset_test))
     
     
     #-----------------------------------------------------------------------------#
@@ -271,30 +246,24 @@ if __name__ == '__main__':
     
     if config.sim_sample:
     
-        # Query Spectrogram Images Train for simsampling
-        spectro_dataset_train = SoundingEarthDatasetEval(data_folder=config.data_folder ,
+        # Query audiogram Images Train for simsampling
+        audio_dataset_train = Wav2VecSoundingEarthDatasetEval(data_folder=config.data_folder ,
                                       split_csv='train_df.csv',
-                                      query_type = "spectro",
-                                      transforms=spectro_transforms_val,
-                                      patch_time_steps=config.patch_time_steps,
-                                      sr_kHz=config.sr_kHz,
-                                      n_mels=config.n_mels,
+                                      query_type = "audio",
+                                      transforms=None
                                       )
             
-        spectro_dataloader_train = DataLoader(spectro_dataset_train,
+        audio_dataloader_train = DataLoader(audio_dataset_train,
                                             batch_size=config.batch_size_eval,
                                             num_workers=config.num_workers,
                                             shuffle=False,
                                             pin_memory=True)
         
         
-        sat_dataset_train = SoundingEarthDatasetEval(data_folder=config.data_folder ,
+        sat_dataset_train = Wav2VecSoundingEarthDatasetEval(data_folder=config.data_folder ,
                                       split_csv='train_df.csv',
                                       query_type = "sat",
                                       transforms=sat_transforms_val,
-                                      patch_time_steps=config.patch_time_steps,
-                                      sr_kHz=config.sr_kHz,
-                                      n_mels=config.n_mels,
                                       )
         
         sat_dataloader_train = DataLoader(sat_dataset_train,
@@ -305,7 +274,7 @@ if __name__ == '__main__':
 
 
         print("\nReference Images Train:", len(sat_dataset_train))
-        print("Query Images Train:", len(spectro_dataset_train))        
+        print("Query Audio Train:", len(audio_dataset_train))        
 
     
     #-----------------------------------------------------------------------------#
@@ -387,7 +356,7 @@ if __name__ == '__main__':
         r1_test = evaluate(config=config,
                            model=model,
                            reference_dataloader=sat_dataloader_test,
-                           query_dataloader=spectro_dataloader_test, 
+                           query_dataloader=audio_dataloader_test, 
                            ranks=[1, 5, 10],
                            step_size=1000,
                            cleanup=True)
@@ -396,7 +365,7 @@ if __name__ == '__main__':
             r1_train, sim_dict = calc_sim(config=config,
                                           model=model,
                                           reference_dataloader=sat_dataloader_train,
-                                          query_dataloader=spectro_dataloader_train, 
+                                          query_dataloader=audio_dataloader_train, 
                                           ranks=[1, 5, 10],
                                           step_size=1000,
                                           cleanup=True)
@@ -441,7 +410,7 @@ if __name__ == '__main__':
             r1_test = evaluate(config=config,
                                model=model,
                                reference_dataloader=sat_dataloader_test,
-                               query_dataloader=spectro_dataloader_test, 
+                               query_dataloader=audio_dataloader_test, 
                                ranks=[1, 5, 10],
                                step_size=1000,
                                cleanup=True)
@@ -450,7 +419,7 @@ if __name__ == '__main__':
                 r1_train, sim_dict = calc_sim(config=config,
                                               model=model,
                                               reference_dataloader=sat_dataloader_train,
-                                              query_dataloader=spectro_dataloader_train, 
+                                              query_dataloader=audio_dataloader_train, 
                                               ranks=[1, 5, 10],
                                               step_size=1000,
                                               cleanup=True)

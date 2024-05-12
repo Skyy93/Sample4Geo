@@ -3,7 +3,7 @@ import timm
 import numpy as np
 import torch.nn as nn
 
-from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
+from transformers import Wav2Vec2Model
 
 class TimmModel(nn.Module):
 
@@ -53,17 +53,16 @@ class TimmModelWav2Vec(TimmModel):
                  pretrained=True,
                  img_size=383):
                  
-        self.wav2vec_processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-large-960h")
-        self.wav2vec_model = Wav2Vec2ForCTC.from_pretrained("facebook/wav2vec2-large-960h")    
+        self.wav2vec_model = Wav2Vec2Model.from_pretrained(model_name_wav2vec)
 
         super(TimmModelWav2Vec, self).__init__(self, 
                  model_name,
                  pretrained=True,
                  img_size=383)
 
-    def forward(self, img, wav):
+    def forward(self, img, audio):
         image_features = self.model(img) if img is not None else None
-        wave_features = self.model_wav2vec(wav) if wav is not None else None
+        audio_features = self.model_wav2vec(audio) if audio is not None else None
              
-        return image_features, wave_features
+        return image_features, audio_features
     

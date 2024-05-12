@@ -57,14 +57,14 @@ class Wav2VecSoundingEarthDatasetTrain(Dataset):
             img = torch.rot90(img, k=r, dims=(1, 2)) 
 
 
-        wav = torch.load(str(self.data_folder / 'raw_audio_tensors' / f'{key}.pt'))
+        audio = torch.load(str(self.data_folder / 'raw_audio_tensorized' / f'{key}.pt'))
 
         lon = np.radians(sample.longitude)
         lat = np.radians(sample.latitude)
         coords = torch.from_numpy(np.stack([lat, lon])).float()
         label = torch.tensor(int(key), dtype=torch.long)  
 
-        return img, wav, label #, coords
+        return img, audio, label #, coords
     
     def __len__(self):
         return len(self.meta)
@@ -178,8 +178,8 @@ class Wav2VecSoundingEarthDatasetEval(Dataset):
 
         self.transforms = transforms     
            
-        if not ( self.query_type == "sat" or self.query_type == "wav" ):
-            raise ValueError("Invalid 'query_type' parameter. 'query_type' must be 'sat' or 'wav'")
+        if not ( self.query_type == "sat" or self.query_type == "audio" ):
+            raise ValueError("Invalid 'query_type' parameter. 'query_type' must be 'sat' or 'audio'")
                 
     def __getitem__(self, index):
 
@@ -194,9 +194,9 @@ class Wav2VecSoundingEarthDatasetEval(Dataset):
             if self.transforms is not None:
                 item = self.transforms(image=item)['image']
                         
-        else: # if self.query_type == "spectro"
+        else: # if self.query_type == "audio"
 
-            item = torch.load(str(self.data_folder / 'raw_audio_tensors' / f'{key}.pt'))
+            item = torch.load(str(self.data_folder / 'raw_audio_tensorized' / f'{key}.pt'))
 
         lon = np.radians(sample.longitude)
         lat = np.radians(sample.latitude)
