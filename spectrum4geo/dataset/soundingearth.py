@@ -79,6 +79,9 @@ class SoundingEarthDatasetTrain(Dataset):
         # satellite image transforms
         if self.transforms_sat_image is not None:
             img = self.transforms_sat_image(image=img)['image']
+        else:
+            img = torch.from_numpy(img)
+            img = img.permute(2, 0, 1)
 
         # rotate sat img 90 or 180 or 270
         if np.random.random() < self.prob_rotate:
@@ -87,38 +90,20 @@ class SoundingEarthDatasetTrain(Dataset):
 
         spectrogram = np.load(self.data_folder / 'spectrograms' / f'{self.n_mels}mel_{self.sr_kHz}kHz' / f'{key}.npy')
 
-        # width of the patch = Count of patch_time_steps
-        patch_width = self.patch_time_steps
-
         # Check if the spectrogram is wide enough, and add padding if necessary
-        if spectrogram.shape[1] < patch_width:
-            padding_width = patch_width - spectrogram.shape[1]
-            # Randomly determining the padding distribution
+        if spectrogram.shape[1] < self.patch_time_steps:
+            padding_width = self.patch_time_steps - spectrogram.shape[1]
             left_padding = np.random.randint(0, padding_width + 1)
             right_padding = padding_width - left_padding
-            # Padding on both left and right sides (along the X-axis) to achieve the required width
             spectrogram = np.pad(spectrogram, ((0, 0), (left_padding, right_padding)), mode='constant', constant_values=-60) # Assumption: -60 dB is considered silence
 
         # Cut a random patch if the spectrogram is wide enough
-        elif spectrogram.shape[1] > patch_width:
-            start = torch.randint(0, spectrogram.shape[1] - patch_width + 1, (1,)).item()
-            # Selecting a random start point and cutting out the patch
-            spectrogram = spectrogram[:, start:start + patch_width]
+        elif spectrogram.shape[1] > self.patch_time_steps:
+            start = torch.randint(0, spectrogram.shape[1] - self.patch_time_steps + 1, (1,)).item()
+            spectrogram = spectrogram[:, start:start + self.patch_time_steps]
     
         # spectrogram = librosa.power_to_db(spectrogram, ref=np.max) # only if data isnt in dB, important: change padded values above!
         
-        # Apply the Viridis colormap
-        #with warnings.catch_warnings():
-        #    warnings.filterwarnings('error', category=RuntimeWarning)  #
-        #    try:
-        #        spectrogram_back = spectrogram
-        #        spectrogram = apply_viridis_colormap(spectrogram)
-        #    except RuntimeWarning as rw:
-        #        log_warning(f'{rw}   :  {key}.npy', 'train_dataloader_warnings.txt')
-        #        spectrogram = None
-        #
-        #if spectrogram is None:    
-
         spectrogram = apply_viridis_colormap(spectrogram)#_back)
 
         if self.transforms_spectrogram is not None:
@@ -127,12 +112,12 @@ class SoundingEarthDatasetTrain(Dataset):
             spectrogram = torch.from_numpy(spectrogram)
             spectrogram = spectrogram.permute(2, 0, 1)
 
-        lon = np.radians(sample.longitude)
-        lat = np.radians(sample.latitude)
-        coords = torch.from_numpy(np.stack([lat, lon])).float()
+        lon = np.radians(sample['longitude'])
+        lat = np.radians(sample['latitude'])
+        coords_radians = torch.from_numpy(np.stack([lat, lon])).float()
         label = torch.tensor(int(key), dtype=torch.long)  
 
-        return img, spectrogram, label #, coords
+        return img, spectrogram, label #, coords_radians (only in Eval)
     
     def __len__(self):
         return len(self.meta)
@@ -268,40 +253,35 @@ class SoundingEarthDatasetEval(Dataset):
             img = cv2.imread(str(self.data_folder / 'images' / f'{key}.jpg'))
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             
-            # image transforms
+            # satellite image transforms
             if self.transforms is not None:
                 img = self.transforms(image=img)['image']
-                        
+            else:
+                img = torch.from_numpy(img)
+                img = img.permute(2, 0, 1)
+                            
         else: # if self.query_type == "spectro"
             img = np.load(self.data_folder / 'spectrograms' / f'{self.n_mels}mel_{self.sr_kHz}kHz' / f'{key}.npy')
 
-            # look at SoundingEarthDatasetTrain getitem for comments
-            patch_width = self.patch_time_steps
-
-            # for Eval only padding on rigth side
-            if img.shape[1] < patch_width:
-                padding_width = patch_width - img.shape[1]
-                img = np.pad(img, ((0, 0), (0, padding_width)), mode='constant', constant_values=-60) # Assumption: -60 dB is considered silence
+            # Check if the spectrogram is wide enough, and add equal padding to the left and right if necessary
+            if img.shape[1] < self.patch_time_steps:
+                padding_width = self.patch_time_steps - img.shape[1]
+                left_padding = padding_width // 2
+                right_padding = padding_width - left_padding
+                img = np.pad(img, ((0, 0), (left_padding, right_padding)), mode='constant', constant_values=-60) # Assumption: -60 dB is considered silence
             
-            elif img.shape[1] > patch_width:
-                start = torch.randint(0, img.shape[1] - patch_width + 1, (1,)).item()
-                img = img[:, start:start + patch_width]
-                        
+            # # Check if the spectrogram is too long and cut an exact segment from the middle
+            # elif img.shape[1] > self.patch_time_steps:
+            #     start = (img.shape[1] - self.patch_time_steps) // 2
+            #     img = img[:, start:start + self.patch_time_steps]       
+
+            # Check if the spectrogram is too long and cut an exact segment from start
+            elif img.shape[1] > self.patch_time_steps:
+                img = img[:, :self.patch_time_steps]        
+            
             # img = librosa.power_to_db(img, ref=np.max) # only if data isnt in dB, important: change padded values above!
 
-            # Apply the Viridis colormap
-            #with warnings.catch_warnings():
-            #    warnings.filterwarnings('error', category=RuntimeWarning)  #
-            #    try:
-            #        img_back = img
-            #        img = apply_viridis_colormap(img)
-            #    except RuntimeWarning as rw:
-            #        log_warning(f'{rw}   :  {key}.npy', 'test_dataloader_warnings.txt')
-            #        img = None
-            #
-            #if img is None: 
-
-            img = apply_viridis_colormap(img)#_back)
+            img = apply_viridis_colormap(img)
 
             if self.transforms is not None:
                 img = self.transforms(image=img)['image']
@@ -309,12 +289,12 @@ class SoundingEarthDatasetEval(Dataset):
                 img = torch.from_numpy(img)
                 img = img.permute(2, 0, 1)
 
-        lon = np.radians(sample.longitude)
-        lat = np.radians(sample.latitude)
-        coords = torch.from_numpy(np.stack([lat, lon])).float()
+        lon = sample['longitude']
+        lat = sample['latitude']
+        coords_radians = torch.tensor([np.radians(lat), np.radians(lon)], dtype=torch.float)
         label = torch.tensor(int(key), dtype=torch.long)  
 
-        return img, label #, coords
+        return img, label, coords_radians
     
     def __len__(self):
         return len(self.meta)

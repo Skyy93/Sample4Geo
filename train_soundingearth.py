@@ -10,8 +10,8 @@ from torch.utils.data import DataLoader
 from transformers import get_constant_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup, get_cosine_schedule_with_warmup
 
 from spectrum4geo.dataset.soundingearth import SoundingEarthDatasetEval, SoundingEarthDatasetTrain
-from spectrum4geo.transforms_ver1 import get_transforms_train_sat, get_transforms_train_spectro 
-from spectrum4geo.transforms_ver1 import get_transforms_val_sat, get_transforms_val_spectro 
+from spectrum4geo.transforms import get_transforms_train_sat, get_transforms_train_spectro 
+from spectrum4geo.transforms import get_transforms_val_sat, get_transforms_val_spectro 
 from spectrum4geo.utils import setup_system, Logger
 from spectrum4geo.trainer import train
 from spectrum4geo.evaluate.soundingearth import evaluate, calc_sim
@@ -25,18 +25,19 @@ class Configuration:
     model: str = 'convnext_base.fb_in22k_ft_in1k_384' 
     
     # Override model image size
-    img_size: int = 384         # for satallite images
-    patch_time_steps = 1024     # Image size for spectograms (Width)
-    n_mels = 128                # image size for spectograms (Height)
-    sr_kHz = 16
+    img_size: int = 384                  # for satallite images
+    patch_time_steps: int = 256          # Image size for spectrograms (Width)
+    n_mels: int = 128                    # image size for spectrograms (Height)
+    sr_kHz: float = 48
     
     # Training 
     mixed_precision: bool = True
     seed = 42
     epochs: int = 40
-    batch_size: int = 48           # keep in mind real_batch_size = 2 * batch_size
+    batch_size: int = 48                  # keep in mind real_batch_size = 2 * batch_size
     verbose: bool = True
-    gpu_ids: tuple = (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)   # GPU ids for training
+    gpu_ids: tuple =  (0,1,2,3,4,5,6,7)   # GPU ids for training
+    #pu_ids: tuple = (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)   # GPU ids for training
     
     
     # Similarity Sampling
@@ -74,7 +75,7 @@ class Configuration:
     prob_flip: float = 0.5             # flipping the sat image 
     
     # Savepath for model checkpoints
-    model_path: str = "./soundingearth"
+    model_path: str = "./soundingearth/training"
     
     # Eval before training
     zero_shot: bool = False 
@@ -154,7 +155,7 @@ if __name__ == '__main__':
     if torch.cuda.device_count() > 1 and len(config.gpu_ids) > 1:
         model = torch.nn.DataParallel(model, device_ids=config.gpu_ids)
 
-    # Print information about Spectogram settings
+    # Print information about Spectrogram settings
     print(f"\nSpectrogram details:\n"
           f"\tSample rate: {config.sr_kHz} kHz\n"
           f"\tn_mels: {config.n_mels}\n"
@@ -235,7 +236,7 @@ if __name__ == '__main__':
     
     
     
-    # Reference Spectogram Images
+    # Reference Spectrogram Images
     spectro_dataset_test = SoundingEarthDatasetEval(data_folder=config.data_folder ,
                                       split_csv='validate_df.csv',
                                       query_type = "spectro",
@@ -384,7 +385,7 @@ if __name__ == '__main__':
         print("\n{}[{}]{}".format(30*"-", "Zero Shot", 30*"-"))  
 
       
-        r1_test = evaluate(config=config,
+        r1_test, median_rank_test, mean_dist_test, roc_auc_test = evaluate(config=config,
                            model=model,
                            reference_dataloader=sat_dataloader_test,
                            query_dataloader=spectro_dataloader_test, 
@@ -393,13 +394,13 @@ if __name__ == '__main__':
                            cleanup=True)
         
         if config.sim_sample:
-            r1_train, sim_dict = calc_sim(config=config,
-                                          model=model,
-                                          reference_dataloader=sat_dataloader_train,
-                                          query_dataloader=spectro_dataloader_train, 
-                                          ranks=[1, 5, 10, 50, 100],
-                                          step_size=1000,
-                                          cleanup=True)
+            r1_train, median_rank_train, mean_dist_train, roc_auc_train, sim_dict = calc_sim(config=config,
+                                            model=model,
+                                            reference_dataloader=sat_dataloader_train,
+                                            query_dataloader=spectro_dataloader_train, 
+                                            ranks=[1, 5, 10, 50, 100],
+                                            step_size=1000,
+                                            cleanup=True)
                 
     #-----------------------------------------------------------------------------#
     # Shuffle                                                                     #
@@ -438,7 +439,7 @@ if __name__ == '__main__':
         
             print("\n{}[{}]{}".format(30*"-", "Evaluate", 30*"-"))
         
-            r1_test = evaluate(config=config,
+            r1_test, median_rank_test, mean_dist_test, roc_auc_test = evaluate(config=config,
                                model=model,
                                reference_dataloader=sat_dataloader_test,
                                query_dataloader=spectro_dataloader_test, 
@@ -447,13 +448,13 @@ if __name__ == '__main__':
                                cleanup=True)
             
             if config.sim_sample:
-                r1_train, sim_dict = calc_sim(config=config,
-                                              model=model,
-                                              reference_dataloader=sat_dataloader_train,
-                                              query_dataloader=spectro_dataloader_train, 
-                                              ranks=[1, 5, 10, 50, 100],
-                                              step_size=1000,
-                                              cleanup=True)
+                r1_train, median_rank_train, mean_dist_train, roc_auc_train, sim_dict  = calc_sim(config=config,
+                                                model=model,
+                                                reference_dataloader=sat_dataloader_train,
+                                                query_dataloader=spectro_dataloader_train, 
+                                                ranks=[1, 5, 10, 50, 100],
+                                                step_size=1000,
+                                                cleanup=True)
                 
             if r1_test > best_score:
 

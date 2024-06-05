@@ -1,0 +1,40 @@
+
+Model: convnext_base.fb_in22k_ft_in1k_384
+{'input_size': (3, 384, 384), 'interpolation': 'bicubic', 'mean': (0.485, 0.456, 0.406), 'std': (0.229, 0.224, 0.225), 'crop_pct': 1.0, 'crop_mode': 'squash'}
+GPUs available: 8
+
+Image Size Sat: (384, 384)
+Mean: (0.485, 0.456, 0.406)
+Std:  (0.229, 0.224, 0.225)
+
+
+Audio segment length: 25 s
+Lr (base/img): 0.001
+Lr (wave2vec2/audio): 2.5e-05
+Reference (Sat) Images Test: 10179
+Reference (Wave) Wav2Vec Test: 10179
+
+(img/base) Scheduler: cosine
+(audio/wave2vec2) Scheduler: cosine
+Warmup Epochs: 1  - Warmup Steps: 743
+Train Epochs:  40 - Train Steps:  29720
+
+------------------------------[Epoch: 1]------------------------------
+Epoch: 1, Train Loss = 3.869, Lr: base/img = 0.001000,  Lr: wave2vec2/audio = 0.000025
+
+------------------------------[Epoch: 2]------------------------------
+Epoch: 2, Train Loss = 3.871, Lr: base/img = 0.000998,  Lr: wave2vec2/audio = 0.000025
+
+------------------------------[Epoch: 3]------------------------------
+Epoch: 3, Train Loss = 3.870, Lr: base/img = 0.000994,  Lr: wave2vec2/audio = 0.000025
+
+------------------------------[Epoch: 4]------------------------------
+Epoch: 4, Train Loss = nan, Lr: base/img = 0.000985,  Lr: wave2vec2/audio = 0.000025
+
+------------------------------[Evaluate]------------------------------
+
+Extract Features:
+Compute Scores:
+Recall@1: 100.0000 - Recall@5: 100.0000 - Recall@10: 100.0000 - Recall@50: 100.0000 - Recall@100: 100.0000 - Recall@top1: 100.0000
+Median Rank: 0.0000
+Mean Distance: 5943.881 km

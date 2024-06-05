@@ -1,0 +1,22 @@
+
+Model: convnext_base.fb_in22k_ft_in1k_384
+{'input_size': (3, 384, 384), 'interpolation': 'bicubic', 'mean': (0.485, 0.456, 0.406), 'std': (0.229, 0.224, 0.225), 'crop_pct': 1.0, 'crop_mode': 'squash'}
+GPUs available: 8
+
+Image Size Sat: (384, 384)
+Mean: (0.485, 0.456, 0.406)
+Std:  (0.229, 0.224, 0.225)
+
+
+Audio segment length: 15 s
+Lr (base/img): 0.001
+Lr (wave2vec2/audio): 0.0001
+Reference (Sat) Images Test: 10179
+Reference (Wave) Wav2Vec Test: 10179
+
+(img/base) Scheduler: cosine
+(audio/wave2vec2) Scheduler: cosine
+Warmup Epochs: 1  - Warmup Steps: 743
+Train Epochs:  40 - Train Steps:  29720
+
+------------------------------[Epoch: 1]------------------------------
