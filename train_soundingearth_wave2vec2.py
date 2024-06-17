@@ -14,7 +14,7 @@ from spectrum4geo.transforms import get_transforms_train_sat, get_transforms_tra
 from spectrum4geo.transforms import get_transforms_val_sat
 
 from spectrum4geo.utils import setup_system, Logger
-from spectrum4geo.trainer import train_wave2vec2 as train
+from spectrum4geo.trainer import train_wav2vec2 as train
 from spectrum4geo.evaluate.soundingearth import evaluate, calc_sim
 from spectrum4geo.loss import InfoNCE
 from spectrum4geo.model import TimmModelWav2Vec2
@@ -24,20 +24,20 @@ class Configuration:
     
     # Model
     model: str = 'convnext_base.fb_in22k_ft_in1k_384' 
-    model_wav2vec: str = 'facebook/wav2vec2-base-960h'
+    model_wav2vec2: str = "facebook/wav2vec2-large-960h" # facebook/wav2vec2-large-960h-lv60-self  (erst das links dann das hier)
     
     # Override model image size
     img_size: int = 384         # for satallite images
     sr_kHz = 16
-    audio_length_s = 15
+    audio_length_s = 50 #old:15
 
     # Training 
     mixed_precision: bool = True
     seed = 42
-    epochs: int = 40
-    batch_size: int = 48         # keep in mind real_batch_size = 2 * batch_size
+    epochs: int = 44
+    batch_size: int = 16       # keep in mind real_batch_size = 2 * batch_size
     verbose: bool = True
-    gpu_ids: tuple = (0,1,2,3,4,5,6,7)   # GPU ids for training
+    gpu_ids: tuple = (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)   # GPU ids for training
     
     
     # Similarity Sampling
@@ -62,13 +62,13 @@ class Configuration:
     label_smoothing: float = 0.1
     
     # Learning Rate
-    lr_base: float = 0.001                  # 1 * 10^-4 for ViT | 1 * 10^-1 for CNN
-    lr_wave2vec2: float = 0.0001
-    scheduler_base: str = "cosine"          # "polynomial" | "cosine" | "constant" | None
-    scheduler_wave2vec2: str = "cosine"
-    lr_base_end: float = 0.0001             #  only for "polynomial"
-    lr_wave2vec2_end: float = 0.0001        #  only for "polynomial"
-    warmup_epochs: int = 1
+    lr_base: float = 0.0005                   # 1 * 10^-4 for ViT | 1 * 10^-1 for CNN
+    lr_wav2vec2: float = 0.00005
+    scheduler_base: str = "cosine"            # "polynomial" | "cosine" | "constant" | None
+    scheduler_wav2vec2: str = "cosine"
+    lr_base_end: float = 0.00005              #  only for "polynomial"
+    lr_wav2vec2_end: float = 0.000005        #  only for "polynomial"
+    warmup_epochs: int = 5
 
     # Dataset
     data_folder = "data"     
@@ -89,7 +89,7 @@ class Configuration:
     checkpoint_start = None   
   
     # set num_workers to 0 if on Windows
-    num_workers: int = 0 if os.name == 'nt' else 4 
+    num_workers: int = 0 if os.name == 'nt' else len(gpu_ids)
     
     # train on GPU if available
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu' 
@@ -132,7 +132,7 @@ if __name__ == '__main__':
 
 
     model = TimmModelWav2Vec2(config.model,
-                      config.model_wav2vec,
+                      config.model_wav2vec2,
                       pretrained=True,
                       img_size=config.img_size)     # no image size needed, this wis more important for an implementation of an ViT
                           
@@ -168,11 +168,11 @@ if __name__ == '__main__':
 
     print(f"\nAudio segment length: {config.audio_length_s} s")
     print(f"Lr (base/img): {config.lr_base}")
-    print(f"Lr (wave2vec2/audio): {config.lr_wave2vec2}")
+    print(f"Lr (wav2vec2/audio): {config.lr_wav2vec2}")
     if config.scheduler_base == "polynomial":
         print(f"Lr_end (base/img): {config.lr_base_end}")
-    if config.scheduler_wave2vec2 == "polynomial":
-        print(f"Lr_end (wave2vec2/audio): {config.lr_wave2vec2_end}")
+    if config.scheduler_wav2vec2 == "polynomial":
+        print(f"Lr_end (wav2vec2/audio): {config.lr_wav2vec2_end}")
 
     #-----------------------------------------------------------------------------#
     # DataLoader                                                                  #
@@ -180,11 +180,11 @@ if __name__ == '__main__':
 
     # Transforms
     sat_transforms_train = get_transforms_train_sat(img_size_sat,
-                                                                   mean=mean,
-                                                                   std=std,
-                                                                   )
+                                                    mean=mean,
+                                                    std=std,)
     
     wave_transforms_train = get_transforms_train_wave()
+
                                                                                                                                   
     # Train
     train_dataset = Wav2Vec2SoundingEarthDatasetTrain(data_folder=config.data_folder ,
@@ -193,11 +193,10 @@ if __name__ == '__main__':
                                           transforms_wave=wave_transforms_train,
                                           audio_length_s=config.audio_length_s,
                                           sr_kHz=config.sr_kHz,
-                                          processor_wav2vec2=config.model_wav2vec,
+                                          processor_wav2vec2=config.model_wav2vec2,
                                           prob_flip=config.prob_flip,
                                           prob_rotate=config.prob_rotate,
-                                          shuffle_batch_size=config.batch_size,
-                                                                                    )
+                                          shuffle_batch_size=config.batch_size,)
     
     
     train_dataloader = DataLoader(train_dataset,
@@ -205,16 +204,14 @@ if __name__ == '__main__':
                                   num_workers=config.num_workers,
                                   shuffle=not config.custom_sampling,
                                   pin_memory=True,
-                                  collate_fn=train_dataset.collate_fn)
+                                  collate_fn=train_dataset.collate_fn,)
     
     
     # Eval
     sat_transforms_val = get_transforms_val_sat(img_size_sat,
                                             mean=mean,
-                                            std=std,
-                                            )
+                                            std=std,)
           
-
 
     # Reference Satellite Images
     sat_dataset_test = Wav2Vec2SoundingEarthDatasetEval(data_folder=config.data_folder ,
@@ -223,15 +220,15 @@ if __name__ == '__main__':
                                         transforms=sat_transforms_val,
                                         audio_length_s=config.audio_length_s,
                                         sr_kHz=config.sr_kHz,
-                                        processor_wav2vec2=config.model_wav2vec,
-                                        )
+                                        processor_wav2vec2=config.model_wav2vec2,)
     
+
     sat_dataloader_test = DataLoader(sat_dataset_test,
                                            batch_size=config.batch_size_eval,
                                            num_workers=config.num_workers,
                                            shuffle=False,
                                            pin_memory=True,
-                                           collate_fn=sat_dataset_test.collate_fn)
+                                           collate_fn=sat_dataset_test.collate_fn,)
     
     
     # Reference wave Data
@@ -241,15 +238,15 @@ if __name__ == '__main__':
                                         transforms=None,
                                         audio_length_s=config.audio_length_s,
                                         sr_kHz=config.sr_kHz,
-                                        processor_wav2vec2=config.model_wav2vec,
-                                        )
+                                        processor_wav2vec2=config.model_wav2vec2,)
+    
         
     wave_dataloader_test = DataLoader(wave_dataset_test,
                                        batch_size=config.batch_size_eval,
                                        num_workers=config.num_workers,
                                        shuffle=False,
                                        pin_memory=True,
-                                       collate_fn=wave_dataset_test.collate_fn)
+                                       collate_fn=wave_dataset_test.collate_fn,)
     
     
     print("Reference (Sat) Images Test:", len(sat_dataset_test))
@@ -278,32 +275,32 @@ if __name__ == '__main__':
                                     transforms=None,
                                     audio_length_s=config.audio_length_s,
                                     sr_kHz=config.sr_kHz,
-                                    processor_wav2vec2=config.model_wav2vec,
-                                    )
+                                    processor_wav2vec2=config.model_wav2vec2,)
+        
             
         wave_dataloader_train = DataLoader(wave_dataset_train,
                                             batch_size=config.batch_size_eval,
                                             num_workers=config.num_workers,
                                             shuffle=False,
                                             pin_memory=True,
-                                            collate_fn=wave_dataset_train.collate_fn)
+                                            collate_fn=wave_dataset_train.collate_fn,)
         
         
-        sat_dataset_train = Wav2Vec2SoundingEarthDatasetEval(data_folder=config.data_folder ,
+        sat_dataset_train = Wav2Vec2SoundingEarthDatasetEval(data_folder=config.data_folder,
                                     split_csv='test_df.csv',
                                     query_type = "sat",
                                     transforms=sat_transforms_val,
                                     audio_length_s=config.audio_length_s,
                                     sr_kHz=config.sr_kHz,
-                                    processor_wav2vec2=config.model_wav2vec,
-                                    )
+                                    processor_wav2vec2=config.model_wav2vec2,)
+        
         
         sat_dataloader_train = DataLoader(sat_dataset_train,
                                                 batch_size=config.batch_size_eval,
                                                 num_workers=config.num_workers,
                                                 shuffle=False,
                                                 pin_memory=True,
-                                                collate_fn=sat_dataset_train.collate_fn)
+                                                collate_fn=sat_dataset_train.collate_fn,)
 
 
         print("\nReference Images Train:", len(sat_dataset_train))
@@ -316,15 +313,13 @@ if __name__ == '__main__':
 
     loss_fn = torch.nn.CrossEntropyLoss(label_smoothing=config.label_smoothing)
     loss_function = InfoNCE(loss_function=loss_fn,
-                            device=config.device,
-                            )
+                            device=config.device,)
 
     if config.mixed_precision:
         scaler = GradScaler(init_scale=2.**10)
     else:
         scaler = None
         
-
     #-----------------------------------------------------------------------------#
     # optimizer                                                                   #
     #-----------------------------------------------------------------------------#
@@ -350,9 +345,9 @@ if __name__ == '__main__':
             {'params': model.module.logit_scale, 'lr': config.lr_base},
             ] + decay_parameters )
 
-    optimizer_wave2vec2 = torch.optim.AdamW([
-            {'params': model.module.wav2vec2_model.parameters(), 'lr': config.lr_wave2vec2},
-            {'params': model.module.projection.parameters(), 'lr': config.lr_wave2vec2},
+    optimizer_wav2vec2 = torch.optim.AdamW([
+            {'params': model.module.wav2vec2_model.parameters(), 'lr': config.lr_wav2vec2},
+            #{'params': model.module.projection.parameters(), 'lr': config.lr_wav2vec2},
             ])
 
     #-----------------------------------------------------------------------------#
@@ -384,10 +379,10 @@ if __name__ == '__main__':
 
     # Separate schedulers for base_model and wav2vec2_model
     scheduler_base = create_scheduler(optimizer_base, config.scheduler_base, train_steps, warmup_steps, lr_end=config.lr_base_end, power=1.5)
-    scheduler_wave2vec2 = create_scheduler(optimizer_wave2vec2, config.scheduler_wave2vec2, train_steps, warmup_steps, lr_end=config.lr_wave2vec2_end, power=1.5)
+    scheduler_wav2vec2 = create_scheduler(optimizer_wav2vec2, config.scheduler_wav2vec2, train_steps, warmup_steps, lr_end=config.lr_wav2vec2_end, power=1.5)
     
     print(f"\n(img/base) Scheduler: {config.scheduler_base}")
-    print(f"(audio/wave2vec2) Scheduler: {config.scheduler_wave2vec2}")
+    print(f"(audio/wav2vec2) Scheduler: {config.scheduler_wav2vec2}")
     print("Warmup Epochs: {} - Warmup Steps: {}".format(str(config.warmup_epochs).ljust(2), warmup_steps))
     print("Train Epochs:  {} - Train Steps:  {}".format(config.epochs, train_steps))
         
@@ -438,15 +433,15 @@ if __name__ == '__main__':
                            model,
                            dataloader=train_dataloader,
                            loss_function=loss_function,
-                           optimizer_list=[optimizer_base, optimizer_wave2vec2],
-                           scheduler_list=[scheduler_base, scheduler_wave2vec2],
-                           lr_monitor=[("lr_base"), ("lr_wave2vec2")],
+                           optimizer_list=[optimizer_base, optimizer_wav2vec2],
+                           scheduler_list=[scheduler_base, scheduler_wav2vec2],
+                           lr_monitor=[("lr_base"), ("lr_wav2vec2")],
                            scaler=scaler)
 
-        print("Epoch: {}, Train Loss = {:.3f}, Lr: base/img = {:.6f},  Lr: wave2vec2/audio = {:.6f}".format(epoch,
+        print("Epoch: {}, Train Loss = {:.3f}, Lr: base/img = {:.6f},  Lr: wav2vec2/audio = {:.6f}".format(epoch,
                                                                    train_loss,
                                                                    optimizer_base.param_groups[0]['lr'],
-                                                                   optimizer_wave2vec2.param_groups[0]['lr']))
+                                                                   optimizer_wav2vec2.param_groups[0]['lr']))
         
         # evaluate
         if (epoch % config.eval_every_n_epoch == 0 and epoch != 0) or epoch == config.epochs:

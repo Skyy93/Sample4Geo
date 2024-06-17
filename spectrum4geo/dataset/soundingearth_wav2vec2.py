@@ -76,7 +76,7 @@ class Wav2Vec2SoundingEarthDatasetTrain(Dataset):
         # Load the audio file
         wav_path = str(self.data_folder / f'mono_audio_wav_{self.sr_kHz}kHz' / f'{key}.wav')
         waveform, file_sr = torchaudio.load(wav_path, normalize = True)
-        waveform = waveform.numpy()
+        waveform = waveform.numpy()#.astype(np.float16)
         #waveform, file_sr = soundfile.read(wav_path, always_2d=True, dtype='float32')
         #waveform = (waveform-np.min(waveform))/(np.max(waveform)-np.min(waveform))
 
@@ -91,14 +91,14 @@ class Wav2Vec2SoundingEarthDatasetTrain(Dataset):
             waveform = waveform[:, start:start + self.sample_length]
         
         # Apply audio transforms
-        if self.transforms_wave is not None:
-            # Reshape the waveform to (1, samples) if it is mono
-            if waveform.ndim == 1:
-                waveform = np.expand_dims(waveform, axis=0)
-            elif waveform.shape[1] == 1:
-                waveform = waveform.T
-
-            waveform = self.transforms_wave(samples=waveform, sample_rate=self.sample_rate)
+        #if self.transforms_wave is not None:
+        #    # Reshape the waveform to (1, samples) if it is mono
+        #    if waveform.ndim == 1:
+        #        waveform = np.expand_dims(waveform, axis=0)
+        #    elif waveform.shape[1] == 1:
+        #        waveform = waveform.T
+        #
+        #    waveform = self.transforms_wave(samples=waveform, sample_rate=self.sample_rate)
 
         # Remove the channel dimension to get a 1D array
         waveform = waveform.squeeze(axis=0)
@@ -277,9 +277,10 @@ class Wav2Vec2SoundingEarthDatasetEval(Dataset):
             # Load the audio file
             wav_path = str(self.data_folder / f'mono_audio_wav_{self.sr_kHz}kHz' / f'{key}.wav')
             item, file_sr = torchaudio.load(wav_path, normalize = True)
-            item = item.numpy()
+            item = item.numpy()#.astype(np.float16)
             #waveform, file_sr = soundfile.read(wav_path, always_2d=True, dtype='float32')
             #item = (waveform-np.min(waveform))/(np.max(waveform)-np.min(waveform))
+            #item = waveform
 
             # Check if the sample rate matches the expected sample rate
             if file_sr != self.sample_rate:
@@ -291,14 +292,14 @@ class Wav2Vec2SoundingEarthDatasetEval(Dataset):
             #     item = item[:, max(0, centric_start):max(0, centric_start) + self.sample_length]
             
             # Apply audio transforms
-            if self.transforms is not None:
-                # Reshape the waveform to (1, samples) if it is mono
-                if item.ndim == 1:
-                    item = np.expand_dims(item, axis=0)
-                elif item.shape[1] == 1:
-                    item = item.T
-
-                item = self.transforms(samples=item, sample_rate=self.sample_rate)
+            #if self.transforms is not None:
+            #    # Reshape the waveform to (1, samples) if it is mono
+            #    if item.ndim == 1:
+            #        item = np.expand_dims(item, axis=0)
+            #    elif item.shape[1] == 1:
+            #        item = item.T
+            #
+            #    item = self.transforms(samples=item, sample_rate=self.sample_rate)
 
             # Remove the channel dimension to get a 1D array 
             item = item.squeeze(axis=0)

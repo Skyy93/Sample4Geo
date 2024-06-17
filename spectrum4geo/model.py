@@ -11,9 +11,8 @@ class TimmModel(nn.Module):
                  model_name,
                  pretrained=True,
                  img_size=383):
-                 
-        super(TimmModel, self).__init__()
         
+        super(TimmModel, self).__init__()
         self.img_size = img_size
         
         if "vit" in model_name:
@@ -46,42 +45,47 @@ class TimmModel(nn.Module):
 
 
 class TimmModelWav2Vec2(TimmModel):
-
+    
     def __init__(self, 
                  model_name,
                  model_name_wav2vec,
                  pretrained=True,
                  img_size=383):
-                 
+        
         super(TimmModelWav2Vec2, self).__init__(model_name, pretrained, img_size)
+        self.wav2vec2_model = Wav2Vec2Model.from_pretrained(model_name_wav2vec, torch_dtype=torch.float32, attn_implementation="eager")
+        self.wav2vec2_model.config.hidden_size = 1024
+        self.wav2vec2_model.config.hidden_dropout = 0
+        self.wav2vec2_model.config.activation_dropout = 0 
+        self.wav2vec2_model.config.attention_dropout = 0 
+        self.wav2vec2_model.config.final_dropout = 0
+        self.wav2vec2_model.config.layerdrop = 0 
+        self.wav2vec2_model.config.feat_proj_dropout = 0
+        self.wav2vec2_model.config.feat_quantizer_dropout = 0
+        self.wav2vec2_model.config.mask_time_prob = 0
+        self.wav2vec2_model.config.apply_spec_augment = False
 
-        self.wav2vec2_model = Wav2Vec2Model.from_pretrained(model_name_wav2vec)
-        self.projection = nn.Linear(768, 1024)  # assuming Wav2Vec2 has 768 hidden units, adjust if it's 1024        
-
-    def forward(self, item_1, item_2=None):
+    def forward(self, item_1, item_2=None, attention_mask=None):
         # Identification of the audio/img tensor
         if item_1.dim() == 4:  
             img = item_1
-            waveform_data, attention_mask = item_2
+            waveform_data = item_2
         else:
-            waveform_data, attention_mask = item_1
+            waveform_data = item_1
             img = item_2
-        
         # Processing of the img tensor
         image_features = self.base_model(img) if img is not None else None
 
         # Processing of the waveform data
-        if waveform_data is not None: 
+        if waveform_data is not None:
             outputs = self.wav2vec2_model(input_values=waveform_data, attention_mask=attention_mask)
             hidden_states = outputs.last_hidden_state
-            hidden_states = self.projection(hidden_states)  # project to match image feature size
-
-            padding_mask = self._get_feature_vector_attention_mask(hidden_states.shape[1], attention_mask)
-            hidden_states[~padding_mask] = 0.0
-            pooled_output = hidden_states.sum(dim=1) / padding_mask.sum(dim=1).view(-1, 1)
-
-            audio_features = self.classifier(pooled_output)
-
+            #hidden_states = self.projection(hidden_states)  # project to match image feature size
+            #padding_mask = self.wav2vec2_model._get_feature_vector_attention_mask(hidden_states.shape[1], attention_mask)
+            #hidden_states[~padding_mask] = 0.0
+            #audio_features = hidden_states.sum(dim=1) / padding_mask.sum(dim=1).view(-1, 1)
+            audio_features = torch.mean(hidden_states, 1)
+            #audio_features = self.projection(audio_features)
         else:
             audio_features = None
             

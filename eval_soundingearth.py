@@ -22,14 +22,14 @@ class Configuration:
     
     # Override model image size
     img_size: int = 384                  # for satallite images
-    patch_time_steps: int = 1024         # Image size for spectrograms (Width)
+    patch_time_steps: int = 1024*4       # Image size for spectrograms (Width)
     n_mels: int = 128                    # image size for spectrograms (Height)
     sr_kHz: float = 48
     
     # Evaluation
     batch_size_eval: int = 128
     verbose: bool = True
-    gpu_ids: tuple =  (0,1,2,3,4,5,6,7,8)          # GPU ids for evaluating
+    gpu_ids: tuple =  (0,1,2,3,4,5,6,7)          # GPU ids for evaluating
     normalize_features: bool = True
     
     # Savepath for model eval logs
@@ -37,10 +37,10 @@ class Configuration:
 
     # Dataset
     data_folder = "data"        
-    split_csv = 'validate_df.csv' #TODO: change back to test.csv
+    split_csv = 'test_df.csv' #TODO: change back to test.csv
 
     # Checkpoint to start from
-    checkpoint_start = 'soundingearth/training/convnext_base.fb_in22k_ft_in1k_384/old/before_eval_middle/48kHz_128mel/1024_patch_width/202313/weights_e4_0.8448.pth'   
+    checkpoint_start = 'soundingearth/training/convnext_base.fb_in22k_ft_in1k_384/145835/weights_end.pth'   
   
     # set num_workers to 0 if on Windows
     num_workers: int = 0 if os.name == 'nt' else 4 
@@ -120,13 +120,13 @@ if __name__ == '__main__':
     
     # Eval
     sat_transforms_val = get_transforms_val_sat(img_size_sat,
-                                                               mean=mean,
-                                                               std=std,
-                                                               )
+                                                mean=mean,
+                                                std=std,
+                                                )
     
     spectro_transforms_val = get_transforms_val_spectro(mean=mean,       
-                                                               std=std
-                                                                )        
+                                                        std=std
+                                                        )        
 
     # Satalite Satellite Images
     sat_dataset_test = SoundingEarthDatasetEval(data_folder=config.data_folder ,
@@ -139,10 +139,10 @@ if __name__ == '__main__':
                                       )
 
     sat_dataloader_test = DataLoader(sat_dataset_test,
-                                           batch_size=config.batch_size_eval,
-                                           num_workers=config.num_workers,
-                                           shuffle=False,
-                                           pin_memory=True)
+                                     batch_size=config.batch_size_eval,
+                                     num_workers=config.num_workers,
+                                     shuffle=False,
+                                     pin_memory=True)
     
     # Spectrogram Ground Images Test
     spectro_dataset_test = SoundingEarthDatasetEval(data_folder=config.data_folder ,
@@ -159,7 +159,6 @@ if __name__ == '__main__':
                                        num_workers=config.num_workers,
                                        shuffle=False,
                                        pin_memory=True)
-    
     
     print("Satalite Images Test:", len(sat_dataset_test))
     print("Spectrogram Images Test:", len(spectro_dataset_test))

@@ -26,7 +26,7 @@ class Configuration:
     
     # Override model image size
     img_size: int = 384                  # for satallite images
-    patch_time_steps: int = 256          # Image size for spectrograms (Width)
+    patch_time_steps: int = 1024*4       # Image size for spectrograms (Width)
     n_mels: int = 128                    # image size for spectrograms (Height)
     sr_kHz: float = 48
     

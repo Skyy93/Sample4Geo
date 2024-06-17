@@ -20,7 +20,6 @@ class InfoNCE(nn.Module):
         logits_per_image2 = logits_per_image1.T
         
         labels = torch.arange(len(logits_per_image1), dtype=torch.long, device=self.device)
-        
         loss = (self.loss_function(logits_per_image1, labels) + self.loss_function(logits_per_image2, labels))/2
 
         return loss  
