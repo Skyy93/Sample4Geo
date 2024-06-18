@@ -285,7 +285,7 @@ def calculate_roc_auc(query_features, reference_features, query_labels, referenc
 
 
 
-# IDEE: Daten vorher filtern! -> FÜR recall, mean_dist und roc_auc
+# IDEE: Daten vorher filtern! Also einmal pro Kontinent aufrufen -> FÜR recall, mean_dist und roc_auc
 # Calculate R for continent (filter every other continent samples)
 def calculate_fct_inside_continent(calculate_fct, query_features, reference_features, query_labels, reference_labels, step_size=1000, ranks=[1,5,10], eval_csv=None, continent="Europe"):
     # Load the CSV containing continent information
@@ -308,7 +308,7 @@ def calculate_fct_inside_continent(calculate_fct, query_features, reference_feat
 
 
 
-# KEINE AHNUNG OB DAS SO RICHTIG IST!!!
+# Noch nicht überprüft ob das funktioniert
 # = Korekte Kontinentvorhersagen / alle Kontinentvorhersagen
 def calculate_continent_recall(query_features, reference_features, query_labels, reference_labels, step_size=1000, ranks=[1,5,10], eval_csv=None):
     # Load the CSV containing continent information

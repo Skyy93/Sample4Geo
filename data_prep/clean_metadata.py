@@ -84,18 +84,40 @@ def get_caption(lat, lon, title, description):
 
 
 def find_continent(point_geom, continent_map):
+    closest_continents = []
+    min_distance = float('inf')
+
+    # Iterate through all continent geometries
     for _, continent_row in continent_map.iterrows():
-        if continent_row.geometry.contains(point_geom):
-            return continent_row['CONTINENT']
+        # Calculate nearest geometry and distance
         nearest_geom = nearest_points(point_geom, continent_row.geometry)[1]
-        if geodesic((point_geom.y, point_geom.x), (nearest_geom.y, nearest_geom.x)).kilometers <= distance_threshold_km:
-            return continent_row['CONTINENT']
+        distance = geodesic((point_geom.y, point_geom.x), (nearest_geom.y, nearest_geom.x)).kilometers
+        
+        # Find potential continents within the distance threshold
+        if distance <= distance_threshold_km:
+            if distance < min_distance:
+                min_distance = distance
+                closest_continents = [(continent_row['CONTINENT'], distance, continent_row.geometry)]
+            elif distance == min_distance:
+                closest_continents.append((continent_row['CONTINENT'], distance, continent_row.geometry))
+    
+    if closest_continents:
+        # If multiple continents are equally close, choose the best fit
+        if len(closest_continents) > 1:
+            best_fit = None
+            best_ratio = float('inf')
+
+            for continent, _, geom in closest_continents:
+                # Calculate a metric indicating how well the point fits with the continent
+                area_ratio = geom.area / geom.distance(point_geom)
+                if area_ratio < best_ratio:
+                    best_ratio = area_ratio
+                    best_fit = continent        
+            return best_fit
+        
+        # Return the single closest continent if there is no tie
+        return closest_continents[0][0]
     return None
-
-
-def calculate_distance_km(point1, point2):
-    return geodesic((point1.y, point1.x), (point2.y, point2.x)).kilometers 
-
 
 def main():
     data_path = cfg.data_path
@@ -118,7 +140,7 @@ def main():
     # Process captions and get addresses
     meta_df['caption'] = [get_caption(row.latitude, row.longitude, row.title, row.description) for row in tqdm(meta_df.itertuples(), total=meta_df.shape[0])]
     meta_df['address'] = meta_df['caption'].apply(lambda x: "The location of the sound is" + x.split("location of the sound is")[1] if "location of the sound is" in x else None)
-
+    
     if ignore_missing_address:
         missing_address_filter = meta_df['address'].isna()
         exclusion_df[f'missing_address'] = missing_address_filter.astype(int)
