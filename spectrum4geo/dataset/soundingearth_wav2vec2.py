@@ -1,21 +1,19 @@
 import cv2
-import numpy as np
-from torch.utils.data import Dataset
-import pandas as pd
 import random
 import copy
 import torch
-from tqdm import tqdm
 import time
-
-from pathlib import Path 
-from transformers import Wav2Vec2Processor
-from torch.nn.utils.rnn import pack_padded_sequence
-from torch.utils.data.dataloader import default_collate
-import soundfile
 import torchaudio
 
-# -> shuffle erstmal ignorieren
+import numpy as np
+import pandas as pd
+
+from tqdm import tqdm
+from pathlib import Path 
+from transformers import Wav2Vec2Processor
+from torch.utils.data import Dataset
+
+
 class Wav2Vec2SoundingEarthDatasetTrain(Dataset):
 
     def __init__(self,
@@ -76,9 +74,7 @@ class Wav2Vec2SoundingEarthDatasetTrain(Dataset):
         # Load the audio file
         wav_path = str(self.data_folder / f'mono_audio_wav_{self.sr_kHz}kHz' / f'{key}.wav')
         waveform, file_sr = torchaudio.load(wav_path, normalize = True)
-        waveform = waveform.numpy()#.astype(np.float16)
-        #waveform, file_sr = soundfile.read(wav_path, always_2d=True, dtype='float32')
-        #waveform = (waveform-np.min(waveform))/(np.max(waveform)-np.min(waveform))
+        waveform = waveform.numpy()
 
         # Check if the sample rate matches the expected sample rate
         if file_sr != self.sample_rate:
@@ -91,24 +87,21 @@ class Wav2Vec2SoundingEarthDatasetTrain(Dataset):
             waveform = waveform[:, start:start + self.sample_length]
         
         # Apply audio transforms
-        #if self.transforms_wave is not None:
-        #    # Reshape the waveform to (1, samples) if it is mono
-        #    if waveform.ndim == 1:
-        #        waveform = np.expand_dims(waveform, axis=0)
-        #    elif waveform.shape[1] == 1:
-        #        waveform = waveform.T
-        #
-        #    waveform = self.transforms_wave(samples=waveform, sample_rate=self.sample_rate)
+        if self.transforms_wave is not None:
+            # Reshape the waveform to (1, samples) if it is mono
+            if waveform.ndim == 1:
+                waveform = np.expand_dims(waveform, axis=0)
+            elif waveform.shape[1] == 1:
+                waveform = waveform.T
+        
+            waveform = self.transforms_wave(samples=waveform, sample_rate=self.sample_rate)
 
         # Remove the channel dimension to get a 1D array
         waveform = waveform.squeeze(axis=0)
 
-        # lon = sample['longitude']
-        # lat = sample['latitude']
-        # coords_radians = torch.tensor([np.radians(lat), np.radians(lon)], dtype=torch.float)
         label = torch.tensor(int(key), dtype=torch.long)  
 
-        return img, waveform, label #,coords
+        return img, waveform, label
     
 
     def collate_fn(self, batch):
@@ -124,9 +117,6 @@ class Wav2Vec2SoundingEarthDatasetTrain(Dataset):
 
         img_tensor_data = torch.stack(img_tensor_data)
         labels_tensor_data = torch.stack(labels_tensor_data)
-
-        #waveform_tensor_data = waveform_data_padded['input_values']
-        #waveform_attention_mask = waveform_data_padded['attention_mask']
         waveform_data_packed = (waveform_data_padded['input_values'], waveform_data_padded['attention_mask'])
 
         return img_tensor_data, waveform_data_packed, labels_tensor_data
@@ -277,43 +267,32 @@ class Wav2Vec2SoundingEarthDatasetEval(Dataset):
             # Load the audio file
             wav_path = str(self.data_folder / f'mono_audio_wav_{self.sr_kHz}kHz' / f'{key}.wav')
             item, file_sr = torchaudio.load(wav_path, normalize = True)
-            item = item.numpy()#.astype(np.float16)
-            #waveform, file_sr = soundfile.read(wav_path, always_2d=True, dtype='float32')
-            #item = (waveform-np.min(waveform))/(np.max(waveform)-np.min(waveform))
-            #item = waveform
+            item = item.numpy()
 
             # Check if the sample rate matches the expected sample rate
             if file_sr != self.sample_rate:
                 raise ValueError(f"Sample rate of {wav_path} is {file_sr*1e-3} kHz, but expected {self.sr_kHz} kHz")
-
-            # # Choose a centric Audiosegment inside the sample
-            # if item.shape[1] > self.sample_length:
-            #     centric_start = (item.shape[1] - self.sample_length) // 2
-            #     item = item[:, max(0, centric_start):max(0, centric_start) + self.sample_length]
             
             # Apply audio transforms
-            #if self.transforms is not None:
-            #    # Reshape the waveform to (1, samples) if it is mono
-            #    if item.ndim == 1:
-            #        item = np.expand_dims(item, axis=0)
-            #    elif item.shape[1] == 1:
-            #        item = item.T
-            #
-            #    item = self.transforms(samples=item, sample_rate=self.sample_rate)
+            if self.transforms is not None:
+                # Reshape the waveform to (1, samples) if it is mono
+                if item.ndim == 1:
+                    item = np.expand_dims(item, axis=0)
+                elif item.shape[1] == 1:
+                    item = item.T
+            
+                item = self.transforms(samples=item, sample_rate=self.sample_rate)
 
             # Remove the channel dimension to get a 1D array 
             item = item.squeeze(axis=0)
 
-        lon = sample['longitude']
-        lat = sample['latitude']
-        coords_radians = torch.tensor([np.radians(lat), np.radians(lon)], dtype=torch.float)
         label = torch.tensor(int(key), dtype=torch.long)  
 
-        return item, label, coords_radians
+        return item, label
 
 
     def collate_fn(self, batch):
-        item_data, labels_tensor_data, coords_radians_tensor_data = zip(*batch)
+        item_data, labels_tensor_data = zip(*batch)
 
         if self.query_type == "sat":
             item_stack = (torch.stack(item_data), None)
@@ -329,9 +308,8 @@ class Wav2Vec2SoundingEarthDatasetEval(Dataset):
             item_stack = (waveform_data_padded['input_values'], waveform_data_padded['attention_mask'])
 
         labels_stack = torch.stack(labels_tensor_data)
-        coords_radians_stack = torch.stack(coords_radians_tensor_data)
 
-        return item_stack, labels_stack, coords_radians_stack
+        return item_stack, labels_stack
     
     def __len__(self):
         return len(self.meta)

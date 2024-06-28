@@ -1,33 +1,37 @@
-import pandas as pd
-from sklearn.metrics import DistanceMetric
 import torch
 import pickle
+
+import numpy as np
+import pandas as pd
+
+from sklearn.metrics import DistanceMetric
 
 # Script for creating an pkl with the TOP_K nearest samples for each sample (train)
 
 # Constants
 TOP_K = 128
 
-# Load data
+# Reading the CSV file 'train_df.csv' into a DataFrame.
 df_train = pd.read_csv('data/train_df.csv')
-train_ids = df_train["short_key"].tolist()
+train_ids = df_train.index
+train_id_to_short_key = df_train['short_key'].to_dict()
 
-print("Length Train Ids:", len(train_ids))
+print("Length Train Ids:", len(df_train))
 
-df_gps = pd.read_csv('data/final_metadata.csv')
-df_gps.set_index('short_key', inplace=True)
+# Reading the CSV file 'final_metadata.csv' into a DataFrame.
+df_gps = pd.read_csv('data/final_metadata.csv', index_col='short_key')
 
 # Prepare GPS coordinates
 gps_coords = {}
 gps_coords_list = []
 
-for idx in train_ids :
-    row = df_gps.loc[idx]
-    coordinates = (float(row["latitude"]), float(row["longitude"]))
-    gps_coords[idx] = coordinates
+for train_id in train_ids:
+    row = df_gps.loc[train_id_to_short_key[train_id]]
+    coordinates = (np.radians(row["latitude"]), np.radians(row["longitude"]))
+    gps_coords[train_id] = coordinates
     gps_coords_list.append(coordinates)
     
-print("Length of gps coords : " +str(len(gps_coords_list)))
+print("Length of gps coords : " + str(len(gps_coords_list)))
 print("Calculation...")
 
 # Calculate distances
@@ -47,11 +51,8 @@ values_near_numpy = values.numpy()
 ids_near_numpy = ids.numpy()
 
 near_neighbors = dict()
-for i, idx in enumerate(train_ids):
-    # Extract indices from the numpy array for the i-th element
-    indices_for_i = ids_near_numpy[i]
-    # Use a list comprehension to gather the corresponding train_ids
-    near_neighbors[idx] = [train_ids[j] for j in indices_for_i]
+for train_id in train_ids:
+    near_neighbors[train_id] = train_ids[ids_near_numpy[train_id]].tolist()
 
 print("Saving...") 
 with open("./data/gps_dict.pkl", "wb") as f:

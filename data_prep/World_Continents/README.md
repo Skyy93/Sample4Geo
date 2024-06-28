@@ -1,16 +1,16 @@
-# World Continents Shapefile Dataset
+# World Continents Files
 
-This project includes the World Continents shapefile dataset, which provides a basemap layer of the world's continents. It is part of the ArcGIS Hub collection, offering comprehensive geographic data for various applications. The dataset can be used in GIS applications for visualization, spatial analysis, and geographic mapping.
+This project includes World Continents files within this directory, which provides a basemap layer of the world's continents. It is part of the ArcGIS Hub collection, offering comprehensive geographic data for various applications. This files can be used in GIS applications for visualization, spatial analysis, and geographic mapping.
 
-## Dataset Description
+## Description
 
-The World Continents dataset contains the following files, which together form the complete shapefile set:
+This directory contains the following files, which together form the complete shapefile set:
 
 - **World_Continents.cpg**
-  - **Description:** Specifies the character encoding used for the dataset. This ensures that text data is correctly interpreted.
+  - **Description:** Specifies the character encoding. This ensures that text data is correctly interpreted.
 
 - **World_Continents.dbf**
-  - **Description:** The dBASE file that stores attribute data for each shape in the dataset. This file is crucial for storing tabular data linked to the shapes.
+  - **Description:** The dBASE file that stores attribute data for each shape. This file is crucial for storing tabular data linked to the shapes.
 
 - **World_Continents.prj**
   - **Description:** Contains projection information, specifying the coordinate system and map projection used by the shapefile. It ensures spatial data is accurately placed on the Earth's surface.
@@ -30,4 +30,4 @@ The World Continents dataset contains the following files, which together form t
 - **Description:** Provides a basemap layer of the continents for the world, useful for geographic analysis and mapping.
 - **Tags:** Basemap, Continents, World, GIS, Shapefile
 - **Thumbnail:**
-  ![World Continents Thumbnail](https://www.arcgis.com/sharing/rest/content/items/57c1ade4fa7c4e2384e6a23f2b3bd254_0/info/thumbnail/thumbnail1704237420766.png?w=500)
+- **Link:** [World Continents Details](https://hub.arcgis.com/datasets/esri::world-continents/about)

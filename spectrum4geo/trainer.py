@@ -1,9 +1,12 @@
 import time
 import torch
+
+import torch.nn.functional as F
+
 from tqdm import tqdm
 from .utils import AverageMeter
 from torch.cuda.amp import autocast
-import torch.nn.functional as F
+
 
 def train(train_config, model, dataloader, loss_function, optimizer, scheduler, scaler=None):
     # set model train mode
@@ -213,7 +216,6 @@ def train_wav2vec2(train_config, model, dataloader, loss_function, optimizer_lis
     return losses.avg
 
 
-
 def predict(train_config, model, dataloader):
     
     model.eval()
@@ -228,20 +230,18 @@ def predict(train_config, model, dataloader):
         
     item_features_list = []
     ids_list = []
-    coords_list = []
     
     ids_list = []
     with torch.no_grad():
         
-        for item, ids, coords_radians in bar:
+        for item, ids in bar:
         
             ids_list.append(ids)
-            coords_list.append(coords_radians)
             
             with autocast():
          
                 if not isinstance(item, tuple) or item[1] == None:
-                    item = item[0].to(train_config.device)
+                    item = item.to(train_config.device)
                     item_feature = model(item)
                 else:
                     attention_mask = item[1].to(train_config.device)
@@ -257,9 +257,8 @@ def predict(train_config, model, dataloader):
         # keep Features on GPU
         item_features = torch.cat(item_features_list, dim=0) 
         ids_list = torch.cat(ids_list, dim=0).to(train_config.device)
-        coords_list = torch.cat(coords_list, dim=0).to(train_config.device)
         
     if train_config.verbose:
         bar.close()
         
-    return item_features, ids_list, coords_list 
+    return item_features, ids_list

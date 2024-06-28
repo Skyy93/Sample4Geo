@@ -1,32 +1,29 @@
 import cv2
-import numpy as np
-from torch.utils.data import Dataset
-import pandas as pd
 import random
 import copy
 import torch
-from tqdm import tqdm
 import time
 
-from pathlib import Path 
+import numpy as np
+import pandas as pd
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 
-# To Convert Spectrogram to "True" 3 Channel Image!
-def apply_viridis_colormap(array):
+from tqdm import tqdm
+from pathlib import Path 
+from torch.utils.data import Dataset
 
-    #array = (array - array.min()) / (array.max() - array.min())
+
+def apply_viridis_colormap(array):
     norm = plt.Normalize(vmin=array.min(), vmax=array.max())
     cmap = cm.get_cmap('viridis')
-
     rgba_array = cmap(norm(array)).astype(np.float32)
     rgb_array = rgba_array[:, :, :3]
 
     return rgb_array
 
-# -> shuffle erstmal ignorieren
-class SoundingEarthDatasetTrain(Dataset):
 
+class SoundingEarthDatasetTrain(Dataset):
     def __init__(self,
                  data_folder='data',
                  split_csv = 'train_df.csv',
@@ -64,9 +61,12 @@ class SoundingEarthDatasetTrain(Dataset):
         self.prob_flip = prob_flip
         self.prob_rotate = prob_rotate
         self.shuffle_batch_size = shuffle_batch_size
+        self.train_ids = self.meta.index.tolist()
+        self.samples = copy.deepcopy(self.train_ids)
                                    
     def __getitem__(self, index):
-        sample = self.meta.iloc[index]
+        idx = self.samples[index]
+        sample = self.meta.iloc[idx]
         key = sample['short_key']
 
         img = cv2.imread(str(self.data_folder / 'images' / f'{key}.jpg'))
@@ -101,9 +101,7 @@ class SoundingEarthDatasetTrain(Dataset):
         elif spectrogram.shape[1] > self.patch_time_steps:
             start = torch.randint(0, spectrogram.shape[1] - self.patch_time_steps + 1, (1,)).item()
             spectrogram = spectrogram[:, start:start + self.patch_time_steps]
-    
-        # spectrogram = librosa.power_to_db(spectrogram, ref=np.max) # only if data isnt in dB, important: change padded values above!
-        
+            
         spectrogram = apply_viridis_colormap(spectrogram)#_back)
 
         if self.transforms_spectrogram is not None:
@@ -112,12 +110,9 @@ class SoundingEarthDatasetTrain(Dataset):
             spectrogram = torch.from_numpy(spectrogram)
             spectrogram = spectrogram.permute(2, 0, 1)
 
-        lon = np.radians(sample['longitude'])
-        lat = np.radians(sample['latitude'])
-        coords_radians = torch.from_numpy(np.stack([lat, lon])).float()
         label = torch.tensor(int(key), dtype=torch.long)  
 
-        return img, spectrogram, label #, coords_radians (only in Eval)
+        return img, spectrogram, label 
     
     def __len__(self):
         return len(self.meta)
@@ -130,7 +125,7 @@ class SoundingEarthDatasetTrain(Dataset):
         print("\nShuffle Dataset:")
 
         # Prepare a list of indices based on the metadata dataframe
-        idx_pool = list(range(len(self.meta)))
+        idx_pool = copy.deepcopy(self.train_ids)
         
         neighbour_split = neighbour_select // 2
         
@@ -154,49 +149,54 @@ class SoundingEarthDatasetTrain(Dataset):
         # progressbar
         pbar = tqdm(total=len(idx_pool))
     
-        while idx_pool:
-            pbar.update(1)
+        while True:
+            pbar.update()
             
-            idx = idx_pool.pop(0)
-            if idx not in idx_batch and idx not in idx_epoch:
-                idx_batch.add(idx)
-                current_batch.append(idx)
-                idx_epoch.add(idx)
-                break_counter = 0
-              
-                if sim_dict and len(current_batch) < self.shuffle_batch_size:
-                    # Access similar and dissimilar indices based on similarity dictionary
-                    near_similarity = similarity_pool[idx][:neighbour_range]
-                    
-                    near_neighbours = copy.deepcopy(near_similarity[:neighbour_split])
-                    far_neighbours = copy.deepcopy(near_similarity[neighbour_split:])
-                    
-                    random.shuffle(far_neighbours)
-                    far_neighbours = far_neighbours[:neighbour_split]
-                    
-                    near_similarity_select = near_neighbours + far_neighbours
-                    
-                    for idx_near in near_similarity_select:
-                        if len(current_batch) >= self.shuffle_batch_size:
-                            break
-                        if idx_near not in idx_batch and idx_near not in idx_epoch:
-                            idx_batch.add(idx_near)
-                            current_batch.append(idx_near)
-                            idx_epoch.add(idx_near)
-                            similarity_pool[idx].remove(idx_near)
-                            break_counter = 0
-            else:
-                # if idx does not fit in batch and is not already used in epoch -> back to pool
-                if idx not in idx_batch and idx not in idx_epoch:
-                    idx_pool.append(idx)
-                    
-                break_counter += 1
+            if len(idx_pool) > 0:
+                idx = idx_pool.pop(0)
                 
-            if break_counter >= 1024:
+                if idx not in idx_batch and idx not in idx_epoch and len(current_batch) < self.shuffle_batch_size:
+                    idx_batch.add(idx)
+                    current_batch.append(idx)
+                    idx_epoch.add(idx)
+                    break_counter = 0
+                    
+                    if sim_dict is not None and len(current_batch) < self.shuffle_batch_size:   
+                        near_similarity = similarity_pool[idx][:neighbour_range]
+                        near_neighbours = copy.deepcopy(near_similarity[:neighbour_split])
+                        far_neighbours = copy.deepcopy(near_similarity[neighbour_split:])
+                        random.shuffle(far_neighbours)
+                        far_neighbours = far_neighbours[:neighbour_split]
+                        near_similarity_select = near_neighbours + far_neighbours
+                        
+                        for idx_near in near_similarity_select:
+                            # check for space in batch
+                            if len(current_batch) >= self.shuffle_batch_size:
+                                break
+                            
+                            # check if idx not already in batch or epoch
+                            if idx_near not in idx_batch and idx_near not in idx_epoch and idx_near:
+                                idx_batch.add(idx_near)
+                                current_batch.append(idx_near)
+                                idx_epoch.add(idx_near)
+                                similarity_pool[idx].remove(idx_near)
+                                break_counter = 0
+                                
+                else:
+                    # if idx fits not in batch and is not already used in epoch -> back to pool
+                    if idx not in idx_batch and idx not in idx_epoch:
+                        idx_pool.append(idx)
+                        
+                    break_counter += 1
+                    
+                if break_counter >= 1024:
+                    break
+                
+            else:
                 break
 
             if len(current_batch) >= self.shuffle_batch_size:
-                # empty current batch bucket to batches
+                # empty current_batch bucket to batches
                 batches.extend(current_batch)
                 idx_batch = set()
                 current_batch = []
@@ -215,7 +215,6 @@ class SoundingEarthDatasetTrain(Dataset):
 
 
 class SoundingEarthDatasetEval(Dataset):
-    
     def __init__(self,
                  data_folder='data',
                  split_csv = 'valid_df.csv',
@@ -245,7 +244,6 @@ class SoundingEarthDatasetEval(Dataset):
             raise ValueError("Invalid 'query_type' parameter. 'query_type' must be 'sat' or 'spectro'")
                 
     def __getitem__(self, index):
-
         sample = self.meta.iloc[index]
         key = sample['short_key']
         
@@ -269,18 +267,11 @@ class SoundingEarthDatasetEval(Dataset):
                 left_padding = padding_width // 2
                 right_padding = padding_width - left_padding
                 img = np.pad(img, ((0, 0), (left_padding, right_padding)), mode='constant', constant_values=-60) # Assumption: -60 dB is considered silence
-            
-            # # Check if the spectrogram is too long and cut an exact segment from the middle
-            # elif img.shape[1] > self.patch_time_steps:
-            #     start = (img.shape[1] - self.patch_time_steps) // 2
-            #     img = img[:, start:start + self.patch_time_steps]       
 
             # Check if the spectrogram is too long and cut an exact segment from start
             elif img.shape[1] > self.patch_time_steps:
                 img = img[:, :self.patch_time_steps]        
             
-            # img = librosa.power_to_db(img, ref=np.max) # only if data isnt in dB, important: change padded values above!
-
             img = apply_viridis_colormap(img)
 
             if self.transforms is not None:
@@ -289,12 +280,9 @@ class SoundingEarthDatasetEval(Dataset):
                 img = torch.from_numpy(img)
                 img = img.permute(2, 0, 1)
 
-        lon = sample['longitude']
-        lat = sample['latitude']
-        coords_radians = torch.tensor([np.radians(lat), np.radians(lon)], dtype=torch.float)
         label = torch.tensor(int(key), dtype=torch.long)  
 
-        return img, label, coords_radians
+        return img, label
     
     def __len__(self):
         return len(self.meta)

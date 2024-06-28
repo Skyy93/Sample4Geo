@@ -1,15 +1,15 @@
 import os
 import pandas as pd
-from functools import partial
-from multiprocessing import Pool
 import torchaudio
 import warnings
-from tqdm import tqdm
 import torch
 import tempfile
 warnings.filterwarnings('ignore')
 
-data_path = "data"
+from config import cfg
+from tqdm import tqdm
+
+data_path = cfg.data_path
 logfile = 'sanity.log'
 
 def simple_logprint(msg):

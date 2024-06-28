@@ -1,10 +1,8 @@
 # This script attempts to perform post-processing of the metadata.csv
 # of the SoundingEarth dataset.
 import os
-import sys
 import re
 import importlib.util
-import numpy as np
 import pandas as pd
 import geopandas as gpd
 from geopy.distance import geodesic
@@ -15,6 +13,9 @@ from shapely.ops import nearest_points
 from cleantext import clean     #pip install clean-text (cleantext is a different package)
 from tqdm import tqdm
 from config import cfg
+
+data_path = cfg.data_path
+logfile = 'clean_metadata.log'
 
 # Set to false to include these samples in the final_metadata.csv
 ignore_corrupt_audio = True
@@ -31,6 +32,10 @@ shapefile_path = "data_prep/World_Continents/World_Continents.shp"
 # Initialize geolocator
 geolocator = Nominatim(user_agent="Spectrum4Geo")
 
+def simple_logprint(msg):
+    print(msg)
+    with open(os.path.join(data_path,logfile), 'a') as file:
+        file.write(msg + "\n")
 
 def reverse_geocoding(lat, lon):
     try:
@@ -40,7 +45,6 @@ def reverse_geocoding(lat, lon):
     except:
         address = None
         return address
-
 
 def clean_description(description):
     sent = re.sub(r'(<br\s*/>)',' ',description)
@@ -68,7 +72,6 @@ def clean_description(description):
     output = re.sub(r'\s+',' ',output)
     return output
 
-
 def get_caption(lat, lon, title, description):
     if pd.notna(description):
         description = description
@@ -81,7 +84,6 @@ def get_caption(lat, lon, title, description):
     else:
         caption = clean_description(description + '.')
     return caption
-
 
 def find_continent(point_geom, continent_map):
     closest_continents = []
@@ -122,43 +124,43 @@ def find_continent(point_geom, continent_map):
 def main():
     data_path = cfg.data_path
     meta_df = pd.read_csv(os.path.join(data_path, 'metadata.csv'))
-    print(f"Total samples loaded: {len(meta_df)}")
+    simple_logprint(f"Total samples loaded: {len(meta_df)}")
     exclusion_df = meta_df[['key', 'short_key']].copy()
 
     # Filter corrupt audio files
     if ignore_corrupt_audio:
         corrupt_ids = pd.read_csv(os.path.join(data_path, "corrupt_ids_final.csv"))['key'].tolist()
         exclusion_df['corrupt_audio'] = exclusion_df['key'].isin(corrupt_ids).astype(int)
-        print(f"Samples with corrupt audio: {exclusion_df['corrupt_audio'].sum()}")
+        simple_logprint(f"Samples with corrupt audio: {exclusion_df['corrupt_audio'].sum()}")
 
     # Filter low sample rate
     if ignore_low_sample_rate:
         low_sr_filter = meta_df['mp3samplerate'] < sr_kHz_lesser_ignore*1e3
         exclusion_df[f'lower_than_{sr_kHz_lesser_ignore}kHz_sample_rate'] = low_sr_filter.astype(int)
-        print(f"Samples with sample rate lower than {sr_kHz_lesser_ignore}kHz: {low_sr_filter.sum()}")
+        simple_logprint(f"Samples with sample rate lower than {sr_kHz_lesser_ignore}kHz: {low_sr_filter.sum()}")
 
     # Process captions and get addresses
-    meta_df['caption'] = [get_caption(row.latitude, row.longitude, row.title, row.description) for row in tqdm(meta_df.itertuples(), total=meta_df.shape[0])]
+    meta_df['caption'] = [get_caption(row.latitude, row.longitude, row.title, row.description) for row in tqdm(meta_df.itertuples(), total=meta_df.shape[0], desc="Processing address information")]
     meta_df['address'] = meta_df['caption'].apply(lambda x: "The location of the sound is" + x.split("location of the sound is")[1] if "location of the sound is" in x else None)
     
     if ignore_missing_address:
         missing_address_filter = meta_df['address'].isna()
         exclusion_df[f'missing_address'] = missing_address_filter.astype(int)
-        print(f"Samples without address information: {missing_address_filter.sum()}")
+        simple_logprint(f"Samples without address information: {missing_address_filter.sum()}")
 
     # Filter by continents
     if ignore_missing_continent:
         geometry = [Point(lon, lat) for lon, lat in zip(meta_df['longitude'], meta_df['latitude'])]
         points_gdf = gpd.GeoDataFrame(geometry=geometry, crs="EPSG:4326")
         continent_map = gpd.read_file(shapefile_path).to_crs(epsg=4326)
-        meta_df['continent'] = [find_continent(point, continent_map) for point in tqdm(points_gdf.geometry, desc="Processing continents")]
+        meta_df['continent'] = [find_continent(point, continent_map) for point in tqdm(points_gdf.geometry, desc="Processing continent information")]
         exclusion_df['missing_continent'] = meta_df['continent'].isna().astype(int)
-        print(f"Samples without continent information: {exclusion_df['missing_continent'].sum()}")
+        simple_logprint(f"Samples without continent information: {exclusion_df['missing_continent'].sum()}")
 
     # Filter final dataset
     filters_combined = (exclusion_df.iloc[:, 2:].sum(axis=1) > 0)
     meta_df = meta_df[~filters_combined]
-    print(f"Total valid samples after filtering: {len(meta_df)}")
+    simple_logprint(f"Total valid samples after filtering: {len(meta_df)}")
 
     # Save reasons for exclusion
     exclusion_df = exclusion_df[filters_combined]
@@ -166,7 +168,6 @@ def main():
 
     # Save final metadata
     meta_df.to_csv(os.path.join(data_path, 'final_metadata.csv'), index=False)
-
 
 if __name__ == "__main__":
     if importlib.util.find_spec("unidecode"):

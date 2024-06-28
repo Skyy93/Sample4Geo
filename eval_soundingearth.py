@@ -1,7 +1,6 @@
 import os
 import time
 import torch
-import shutil
 import sys
 
 from dataclasses import dataclass
@@ -29,7 +28,7 @@ class Configuration:
     # Evaluation
     batch_size_eval: int = 128
     verbose: bool = True
-    gpu_ids: tuple =  (0,1,2,3,4,5,6,7)          # GPU ids for evaluating
+    gpu_ids: tuple =  (0,1,2,3)          # GPU ids for evaluating
     normalize_features: bool = True
     
     # Savepath for model eval logs
@@ -37,7 +36,7 @@ class Configuration:
 
     # Dataset
     data_folder = "data"        
-    split_csv = 'test_df.csv' #TODO: change back to test.csv
+    evaluate_csv = 'test_df.csv' 
 
     # Checkpoint to start from
     checkpoint_start = 'soundingearth/training/convnext_base.fb_in22k_ft_in1k_384/145835/weights_end.pth'   
@@ -74,7 +73,7 @@ if __name__ == '__main__':
 
     print("\nModel: {}".format(config.model))
 
-    print(f"Used .csv file for evaluating: {config.split_csv}")
+    print(f"Used .csv file for evaluating: {config.evaluate_csv}")
 
     model = TimmModel(config.model,
                       pretrained=True,
@@ -130,7 +129,7 @@ if __name__ == '__main__':
 
     # Satalite Satellite Images
     sat_dataset_test = SoundingEarthDatasetEval(data_folder=config.data_folder ,
-                                      split_csv=config.split_csv, 
+                                      split_csv=config.evaluate_csv, 
                                       query_type = "sat",
                                       transforms=sat_transforms_val,
                                       patch_time_steps=config.patch_time_steps,
@@ -146,7 +145,7 @@ if __name__ == '__main__':
     
     # Spectrogram Ground Images Test
     spectro_dataset_test = SoundingEarthDatasetEval(data_folder=config.data_folder ,
-                                      split_csv=config.split_csv, 
+                                      split_csv=config.evaluate_csv, 
                                       query_type="spectro",
                                       transforms=spectro_transforms_val,
                                       patch_time_steps=config.patch_time_steps,
@@ -169,7 +168,7 @@ if __name__ == '__main__':
     
     print("\n{}[{}]{}".format(30*"-", "SoundingEarth", 30*"-"))  
 
-    r1_test, median_rank_test, mean_dist_test, roc_auc_test = evaluate(config=config,
+    r1_test = evaluate(config=config,
                        model=model,
                        reference_dataloader=sat_dataloader_test,
                        query_dataloader=spectro_dataloader_test, 
