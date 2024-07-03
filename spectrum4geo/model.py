@@ -54,16 +54,23 @@ class TimmModelWav2Vec2(TimmModel):
         
         super(TimmModelWav2Vec2, self).__init__(model_name, pretrained, img_size)
         self.wav2vec2_model = Wav2Vec2Model.from_pretrained(model_name_wav2vec, torch_dtype=torch.float32, attn_implementation="eager")
-        self.wav2vec2_model.config.hidden_size = 1024
-        self.wav2vec2_model.config.hidden_dropout = 0
-        self.wav2vec2_model.config.activation_dropout = 0 
-        self.wav2vec2_model.config.attention_dropout = 0 
-        self.wav2vec2_model.config.final_dropout = 0
-        self.wav2vec2_model.config.layerdrop = 0 
-        self.wav2vec2_model.config.feat_proj_dropout = 0
-        self.wav2vec2_model.config.feat_quantizer_dropout = 0
-        self.wav2vec2_model.config.mask_time_prob = 0
-        self.wav2vec2_model.config.apply_spec_augment = False
+        # self.wav2vec2_model.config.hidden_dropout = 0
+        # self.wav2vec2_model.config.activation_dropout = 0 
+        # self.wav2vec2_model.config.attention_dropout = 0 
+        # self.wav2vec2_model.config.final_dropout = 0
+        # self.wav2vec2_model.config.layerdrop = 0 
+        # self.wav2vec2_model.config.feat_proj_dropout = 0
+        # self.wav2vec2_model.config.feat_quantizer_dropout = 0
+        # self.wav2vec2_model.config.mask_time_prob = 0
+        # self.wav2vec2_model.config.apply_spec_augment = False
+
+        # For large wav2vec2 models, the hidden size can be configured, but this does not apply to base models
+        # So base wav2vec2 models need an linear projection layer
+        if "base" in model_name_wav2vec:
+            self.projection = nn.Linear(768, 1024)
+        else:
+            self.wav2vec2_model.config.hidden_size = 1024
+            self.projection = nn.Identity()
 
     def forward(self, item_1, item_2=None, attention_mask=None):
         # Identification of the audio/img tensor
@@ -85,7 +92,7 @@ class TimmModelWav2Vec2(TimmModel):
             #hidden_states[~padding_mask] = 0.0
             #audio_features = hidden_states.sum(dim=1) / padding_mask.sum(dim=1).view(-1, 1)
             audio_features = torch.mean(hidden_states, 1)
-            #audio_features = self.projection(audio_features)
+            audio_features = self.projection(audio_features)
         else:
             audio_features = None
             

@@ -8,7 +8,7 @@ from tqdm import tqdm
 from pathlib import Path 
 from sklearn.metrics import DistanceMetric
 
-from ..trainer import predict
+from ..trainer import get_predict_fct
 
 
 def evaluate(config,
@@ -22,9 +22,13 @@ def evaluate(config,
     split_path = Path(config.data_folder) / config.evaluate_csv
     meta_df = pd.read_csv(split_path, index_col='short_key')
 
+    # used to select fitting predict function for used approach
+    query_predict = get_predict_fct(query_dataloader)
+    reference_predict = get_predict_fct(reference_dataloader)
+
     print("\nExtract Features:")
-    reference_features, reference_labels = predict(config, model, reference_dataloader) 
-    query_features, query_labels = predict(config, model, query_dataloader)
+    query_features, query_labels = query_predict(config, model, query_dataloader)
+    reference_features, reference_labels = reference_predict(config, model, reference_dataloader) 
     
     print("Compute Scores:\n")
     label_ids_until_hit = calculate_label_ids_until_hit(query_features, reference_features, reference_labels, step_size=step_size)

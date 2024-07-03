@@ -24,20 +24,24 @@ from spectrum4geo.model import TimmModelWav2Vec2
 class Configuration:
     # Model
     model: str = 'convnext_base.fb_in22k_ft_in1k_384' 
-    model_wav2vec2: str = 'facebook/wav2vec2-large-960h'  # facebook/wav2vec2-large-960h-lv60-self  (erst das links dann das hier)
-    
+    model_wav2vec2: str = 'facebook/wav2vec2-large-960h'  
+
+    # facebook/wav2vec2-base-960h
+    # facebook/wav2vec2-large-960h
+    # facebook/wav2vec2-large-960h-lv60-self
+
     # Override model image size
     img_size: int = 384                 # for satallite images
     sr_kHz = 16
-    audio_length_s = 10 #old:15
+    audio_length_s = 15 #old:15
 
     # Training 
     mixed_precision: bool = True
     seed = 42
-    epochs: int = 44
+    epochs: int = 50
     batch_size: int = 64                # keep in mind real_batch_size = 2 * batch_size
     verbose: bool = True
-    gpu_ids: tuple =  (0,1,2,3,4,5,6,7)         # GPU ids for training
+    gpu_ids: tuple =  (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)   # GPU ids for training
     #gpu_ids: tuple = (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)   # GPU ids for training
     
     # Similarity Sampling
@@ -63,11 +67,11 @@ class Configuration:
     
     # Learning Rate
     lr_base: float = 0.001              # 1 * 10^-4 for ViT | 1 * 10^-1 for CNN
-    lr_wav2vec2: float = 0.0001
+    lr_wav2vec2: float = 0.00001
     scheduler_base: str = 'cosine'      # 'polynomial' | 'cosine' | 'constant' | None
     scheduler_wav2vec2: str = 'cosine'
     lr_base_end: float = 0.0001         #  only for 'polynomial'
-    lr_wav2vec2_end: float = 0.00001    #  only for 'polynomial'
+    lr_wav2vec2_end: float = 0.000001   #  only for 'polynomial'
     warmup_epochs: int = 5
 
     # Dataset
@@ -81,9 +85,9 @@ class Configuration:
     
     # Savepath for model checkpoints
     if custom_sampling and gps_sample and sim_sample:
-        model_path: str = f'./soundingearth_wav2vec2/Shuffle_On/{audio_length_s}_s' 
+        model_path: str = f'./soundingearth_wav2vec2/training/audio_length_{audio_length_s}_s/Shuffle_On' 
     else:
-        model_path: str = f'./soundingearth_wav2vec2/Shuffle_Off/{audio_length_s}_s' 
+        model_path: str = f'./soundingearth_wav2vec2/training/audio_length_{audio_length_s}_s/Shuffle_Off' 
     
     # Eval before training
     zero_shot: bool = False 
@@ -161,6 +165,10 @@ if __name__ == '__main__':
     if torch.cuda.device_count() > 1 and len(config.gpu_ids) > 1:
         model = torch.nn.DataParallel(model, device_ids=config.gpu_ids)
             
+    # Print inforamtions of used batch sizes
+    print(f'Model training batch size: {config.batch_size}')
+    print(f'Model evaluation batch size: {config.batch_size_eval}')
+
     # Print information about audio related settings
     print(f'Model sampling rate: {config.sr_kHz} kHz')
     print(f'Audio segment length: {config.audio_length_s} s')
@@ -345,7 +353,10 @@ if __name__ == '__main__':
                                        ] + decay_parameters 
                                        )
 
-    optimizer_wav2vec2 = torch.optim.AdamW([{'params': model.module.wav2vec2_model.parameters(), 'lr': config.lr_wav2vec2},])
+    optimizer_wav2vec2 = torch.optim.AdamW([
+                                            {'params': model.module.wav2vec2_model.parameters(), 'lr': config.lr_wav2vec2},
+                                            {'params': model.module.projection.parameters(), 'lr': config.lr_wav2vec2},]
+                                            )
 
     #-----------------------------------------------------------------------------#
     # Scheduler                                                                   #

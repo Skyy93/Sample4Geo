@@ -5,12 +5,14 @@ import sys
 import torch
 import pickle
 
+from math import ceil
 from dataclasses import dataclass
 from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader
 from transformers import get_constant_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup, get_cosine_schedule_with_warmup
 
-from spectrum4geo.dataset.soundingearth import SoundingEarthDatasetEval, SoundingEarthDatasetTrain
+from spectrum4geo.dataset.soundingearth_eval import SatEvalDataset, SpectroEvalDataset
+from spectrum4geo.dataset.soundingearth_train import SatSpectroTrainDataset
 from spectrum4geo.transforms import get_transforms_train_sat, get_transforms_train_spectro 
 from spectrum4geo.transforms import get_transforms_val_sat, get_transforms_val_spectro 
 from spectrum4geo.utils import setup_system, Logger
@@ -18,6 +20,12 @@ from spectrum4geo.trainer import train
 from spectrum4geo.evaluate.soundingearth import evaluate, calc_sim
 from spectrum4geo.loss import InfoNCE
 from spectrum4geo.model import TimmModel
+
+patch_widt_opti = 16384
+n_mels_opti = 128
+batch_size_opti = 80
+
+product_opti = n_mels_opti * patch_widt_opti
 
 
 @dataclass
@@ -27,7 +35,7 @@ class Configuration:
     
     # Override model image size
     img_size: int = 384                 # for satallite images
-    patch_time_steps: int = 256         # Image size for spectrograms (Width)
+    patch_time_steps: int = 16384       # Image size for spectrograms (Width)
     n_mels: int = 128                   # image size for spectrograms (Height)
     sr_kHz: float = 48
     
@@ -35,15 +43,17 @@ class Configuration:
     mixed_precision: bool = True
     seed = 42
     epochs: int = 40
-    batch_size: int = 48                # keep in mind real_batch_size = 2 * batch_size
     verbose: bool = True
-    gpu_ids: tuple =  (0,1,2,3,4,5,6,7)         # GPU ids for training
+    gpu_ids: tuple =  (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)         # GPU ids for training
     #gpu_ids: tuple = (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)   # GPU ids for training
     
+    # Calculate the batch size to optimally fill GPU memory
+    batch_size: int = round(((patch_time_steps * n_mels) / product_opti) / len(gpu_ids) * batch_size_opti) * len(gpu_ids)
+    
     # Similarity Sampling
-    custom_sampling: bool = True                # use custom sampling instead of random     -> To False for not using shuffle function of dataloader!
-    gps_sample: bool = True                     # use gps sampling                          -> To False for not using shuffle function of dataloader!
-    sim_sample: bool = True                     # use similarity sampling                   -> To False for not using shuffle function of dataloader!
+    custom_sampling: bool = False                # use custom sampling instead of random     -> To False for not using shuffle function of dataloader!
+    gps_sample: bool = False                     # use gps sampling                          -> To False for not using shuffle function of dataloader!
+    sim_sample: bool = False                     # use similarity sampling                   -> To False for not using shuffle function of dataloader!
     neighbour_select: int = 64                  # max selection size from pool
     neighbour_range: int = 128                  # pool size for selection
     gps_dict_path: str = 'data/gps_dict.pkl'    # path to pre-computed distances
@@ -78,9 +88,9 @@ class Configuration:
     
     # Savepath for model checkpoints
     if custom_sampling and gps_sample and sim_sample:
-        model_path: str = f'./soundingearth/Shuffle_On/{n_mels}_mel_{sr_kHz}_kHz' 
+        model_path: str = f'./soundingearth/training/{n_mels}_mel_{sr_kHz}_kHz/Shuffle_On' 
     else:
-        model_path: str = f'./soundingearth/Shuffle_Off/{n_mels}_mel_{sr_kHz}_kHz' 
+        model_path: str = f'./soundingearth/training/{n_mels}_mel_{sr_kHz}_kHz/Shuffle_Off' 
 
     # Eval before training
     zero_shot: bool = False 
@@ -157,11 +167,16 @@ if __name__ == '__main__':
     if torch.cuda.device_count() > 1 and len(config.gpu_ids) > 1:
         model = torch.nn.DataParallel(model, device_ids=config.gpu_ids)
 
+    # Print inforamtions of used batch sizes
+    print(f'Model training batch size: {config.batch_size}')
+    print(f'Model evaluation batch size: {config.batch_size_eval}')
+
     # Print information about Spectrogram settings
     print(f'Spectrogram details:\n'
           f'\tSample rate: {config.sr_kHz} kHz\n'
           f'\tn_mels: {config.n_mels}\n'
-          f'\tPatch width (time steps): {config.patch_time_steps}')     
+          f'\tPatch width (time steps): {config.patch_time_steps}'
+          )     
            
     # Model to device   
     model = model.to(config.device)
@@ -187,7 +202,7 @@ if __name__ == '__main__':
                                                             )                                                               
                                                                   
     # Train
-    train_dataset = SoundingEarthDatasetTrain(data_folder=config.data_folder,
+    train_dataset = SatSpectroTrainDataset(data_folder=config.data_folder,
                                               split_csv=config.train_csv,
                                               transforms_sat_image=sat_transforms_train,
                                               transforms_spectrogram=spectro_transforms_train,
@@ -217,13 +232,9 @@ if __name__ == '__main__':
                                                         )        
 
     # Reference Satellite Images
-    sat_dataset_test = SoundingEarthDatasetEval(data_folder=config.data_folder,
+    sat_dataset_test = SatEvalDataset(data_folder=config.data_folder,
                                                 split_csv=config.evaluate_csv,
-                                                query_type = 'sat',
                                                 transforms=sat_transforms_val,
-                                                patch_time_steps=config.patch_time_steps,
-                                                sr_kHz=config.sr_kHz,
-                                                n_mels=config.n_mels
                                                 )
     
     sat_dataloader_test = DataLoader(sat_dataset_test,
@@ -234,9 +245,8 @@ if __name__ == '__main__':
                                      )
     
     # Reference Spectrogram Images
-    spectro_dataset_test = SoundingEarthDatasetEval(data_folder=config.data_folder ,
+    spectro_dataset_test = SpectroEvalDataset(data_folder=config.data_folder ,
                                                     split_csv=config.evaluate_csv,
-                                                    query_type = 'spectro',
                                                     transforms=spectro_transforms_val,
                                                     patch_time_steps=config.patch_time_steps,
                                                     sr_kHz=config.sr_kHz,
@@ -270,14 +280,13 @@ if __name__ == '__main__':
     if config.sim_sample:
     
         # Query Spectrogram Images Train for simsampling
-        spectro_dataset_train = SoundingEarthDatasetEval(data_folder=config.data_folder,
-                                                         split_csv=config.train_csv,
-                                                         query_type = 'spectro',
-                                                         transforms=spectro_transforms_val,
-                                                         patch_time_steps=config.patch_time_steps,
-                                                         sr_kHz=config.sr_kHz,
-                                                         n_mels=config.n_mels
-                                                         )
+        spectro_dataset_train = SatEvalDataset(data_folder=config.data_folder ,
+                                                    split_csv=config.train_csv,
+                                                    transforms=spectro_transforms_val,
+                                                    patch_time_steps=config.patch_time_steps,
+                                                    sr_kHz=config.sr_kHz,
+                                                    n_mels=config.n_mels,
+                                                    )
             
         spectro_dataloader_train = DataLoader(spectro_dataset_train,
                                               batch_size=config.batch_size_eval,
@@ -286,13 +295,10 @@ if __name__ == '__main__':
                                               pin_memory=True
                                               )
         
-        sat_dataset_train = SoundingEarthDatasetEval(data_folder=config.data_folder,
+        sat_dataset_train = SatEvalDataset(data_folder=config.data_folder,
                                                      split_csv=config.train_csv,
                                                      query_type = 'sat',
                                                      transforms=sat_transforms_val,
-                                                     patch_time_steps=config.patch_time_steps,
-                                                     sr_kHz=config.sr_kHz,
-                                                     n_mels=config.n_mels,
                                                      )
         
         sat_dataloader_train = DataLoader(sat_dataset_train,
