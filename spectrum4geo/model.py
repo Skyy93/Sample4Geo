@@ -5,6 +5,7 @@ import torch.nn as nn
 
 from transformers import Wav2Vec2Model
 
+
 class TimmModel(nn.Module):
 
     def __init__(self, 
@@ -41,7 +42,6 @@ class TimmModel(nn.Module):
         else:
             image_features = self.base_model(img1)             
             return image_features
-
 
 
 class TimmModelWav2Vec2(TimmModel):
@@ -103,4 +103,4 @@ class TimmModelWav2Vec2(TimmModel):
             return audio_features
         else:
             return image_features
-    
+

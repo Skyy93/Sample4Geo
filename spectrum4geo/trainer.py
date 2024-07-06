@@ -7,22 +7,19 @@ from math import ceil
 from tqdm import tqdm
 from .utils import AverageMeter
 from torch.cuda.amp import autocast
-from functools import wraps
+from collections import defaultdict
 
-from spectrum4geo.dataset.soundingearth_eval import SatEvalDataset, SpectroEvalDataset, SpectroTestDataset, WavEvalDataset
+from spectrum4geo.dataset.evaluation import SatEvalDataset, SpectroEvalDataset, WavEvalDataset
+
 
 def train(train_config, model, dataloader, loss_function, optimizer, scheduler, scaler=None):
     # set model train mode
     model.train()
-    
     losses = AverageMeter()
-    
     # wait before starting progress bar
     time.sleep(0.1)
-    
     # Zero gradients for first step
     optimizer.zero_grad(set_to_none=True)
-    
     step = 1
     
     if train_config.verbose:
@@ -37,14 +34,13 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler, 
                 # data (batches) to device   
                 sat_img = sat_img.to(train_config.device)
                 features1, features2 = model(sat_img, reference.to(train_config.device))
-
+                # Forward pass
                 if torch.cuda.device_count() > 1 and len(train_config.gpu_ids) > 1: 
                     loss = loss_function(features1, features2, model.module.logit_scale.exp())
                 else:
                     loss = loss_function(features1, features2, model.logit_scale.exp()) 
                 losses.update(loss.item())
                 
-                  
             scaler.scale(loss).backward()
             
             # Gradient clipping 
@@ -57,12 +53,10 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler, 
             scaler.update()
             # Zero gradients for next step
             optimizer.zero_grad()
-            
             # Scheduler
             scheduler.step()
 
         else:
-        
             # data (batches) to device   
             sat_img = sat_img.to(train_config.device)
             features1, features2 = model(sat_img, reference.to(train_config.device))
@@ -84,7 +78,6 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler, 
             optimizer.step()
             # Zero gradients for next step
             optimizer.zero_grad()
-            
             # Scheduler
             scheduler.step()
 
@@ -219,117 +212,13 @@ def train_wav2vec2(train_config, model, dataloader, loss_function, optimizer_lis
     return losses.avg
 
 
-
-
-
-
-
-
-
-
-
-
-
-test=True
-def predict_wav_test(train_config, model, dataloader):
-    
-    model.eval()
-    
-    # wait before starting progress bar
-    time.sleep(0.1)
-    
-    if train_config.verbose:
-        bar = tqdm(dataloader, total=len(dataloader))
-    else:
-        bar = dataloader
-        
-    item_features_list = []
-    ids_list = []
-    with torch.no_grad():
-        
-        for item, ids in bar:
-            ids_list.append(ids)
-            
-            with autocast():
-
-                # for the wav2vec2 approach (audio)
-                if dataloader.dataset.query_type == 'audio':
-                    attention_mask = item[1].to(train_config.device)
-                    item = item[0].to(train_config.device)
-                    if not test:
-                        item_feature = model(item, attention_mask=attention_mask)
-                    else:
-                        item_features_dict = {int(id): [] for id in ids} 
-                        first_features = model(item, attention_mask=attention_mask)
-                        for id, feature in zip(ids,first_features):
-                            item_features_dict[int(id)].append(feature.squeeze())
-
-                        for id in ids:
-                            counter = 1
-                            #print(f"{int(id)}\: " ,end="")
-                            next_item = dataloader.dataset.get_next_chunk(int(id), counter)
-                            while next_item is not None:
-                                #print(f"{counter} ",end="")
-                                item = next_item[0].to(train_config.device)
-                                attention_mask = next_item[1].to(train_config.device)
-                                feature = model(item, attention_mask=attention_mask)
-
-                                item_features_dict[int(id)].append(feature.squeeze())
-
-                                counter += 1
-                                next_item = dataloader.dataset.get_next_chunk(int(id), counter)
-
-                            #print()
-
-                        item_feature = mymean(item_features_dict).to(train_config.device)
-
-                # for images (sat/spectrogram)
-                else:
-                    item = item.to(train_config.device)
-                    item_feature = model(item)
-
-                # normalize is calculated in fp32
-                if train_config.normalize_features:
-                    item_feature = F.normalize(item_feature, dim=-1)
-            
-            # save features in fp32 for sim calculation
-            item_features_list.append(item_feature.to(torch.float32))
-        # keep Features on GPU
-        item_features = torch.cat(item_features_list, dim=0) 
-        ids_list = torch.cat(ids_list, dim=0).to(train_config.device)
-        
-    if train_config.verbose:
-        bar.close()
-        
-    return item_features, ids_list
-
-
-def mymean(feature_dict):
-    """Calculate the mean of lists of tensors stored in a dictionary."""
-    aggregated_features = []
-    for features in feature_dict.values():
-        if features:  # ensure the list is not empty
-            try:
-                stacked_features = torch.stack(features)
-                mean_features = torch.mean(stacked_features, dim=0)
-                aggregated_features.append(mean_features)
-            except RuntimeError as e:
-                print("Error stacking features:", e)
-                print("Shapes of features being stacked:", [f.shape for f in features])
-    return torch.stack(aggregated_features)
-
-
-
-
-
-
-def predict_basic(train_config, model, dataloader, tqdm_desk):
+def predict_basic_image(train_config, model, dataloader, tqdm_desc):
     model.eval()
     # wait before starting progress bar
     time.sleep(0.1)
     
     if train_config.verbose:
-        bar = tqdm(dataloader, desc=tqdm_desk, total=len(dataloader))
+        bar = tqdm(dataloader, desc=tqdm_desc, total=len(dataloader))
     else:
         bar = dataloader
         
@@ -350,6 +239,7 @@ def predict_basic(train_config, model, dataloader, tqdm_desk):
             
             # save features in fp32 for sim calculation
             item_features_list.append(item_feature.to(torch.float32))
+            
         # keep Features on GPU
         item_features = torch.cat(item_features_list, dim=0) 
         ids_list = torch.cat(ids_list, dim=0).to(train_config.device)
@@ -360,66 +250,86 @@ def predict_basic(train_config, model, dataloader, tqdm_desk):
     return item_features, ids_list
 
 
-
-def predict_spectrograms_test(train_config, model, dataloader):
+def predict_chunked_spectrogram(train_config, model, dataloader):
     model.eval()
     # wait before starting progress bar
     time.sleep(0.1)
     
     if train_config.verbose:
-        bar = tqdm(dataloader, desc="Extract Query Features (Mel Spectrograms)", total=len(dataloader))
+        bar = tqdm(dataloader, desc="[CHUNKING ENABLED] Extract Query Features (Mel Spectrograms)", total=len(dataloader))
+    else:
+        bar = dataloader
+
+    with torch.no_grad(): # Disable gradient computation
+        # first initialisation (One Run):
+        sample = dataloader.dataset[0][0].unsqueeze(0).to(train_config.device)
+        sample_feature = model(sample)
+        item_feature_size = sample_feature.shape[1]
+        del sample_feature
+
+        # initialisation of resulting spectro_features_accumulated:
+        num_label_ids = dataloader.dataset.len_of_label_ids()
+        spectro_features_accumulated = torch.zeros(num_label_ids, item_feature_size, device=train_config.device)
+
+        for spectro_batch, label_id_batch, weight_batch in bar:
+            # Enable mixed precision
+            with autocast(): 
+                spectro_batch = spectro_batch.to(train_config.device)
+                weight_batch = weight_batch.to(train_config.device)
+                label_id_batch = label_id_batch.to(train_config.device)
+
+                spectro_features = model(spectro_batch)
+                weight_batch = weight_batch.unsqueeze(1).expand_as(spectro_features)
+                spectro_features_weighted = weight_batch * spectro_features
+
+                spectro_features_accumulated.index_add_(0, label_id_batch, spectro_features_weighted)
+
+        # normalize is calculated in fp32
+        if train_config.normalize_features:
+            spectro_features_accumulated = F.normalize(spectro_features_accumulated, dim=-1)
+
+        # save features in fp32 for sim calculation
+        spectro_features_accumulated = spectro_features_accumulated.to(torch.float32)
+
+        # creating label_ids using torch.arange() since spectro_features_accumulated is in order
+        label_ids = torch.arange(num_label_ids, dtype=torch.long).to(train_config.device)
+        
+    if train_config.verbose:
+        bar.close()
+        
+    return spectro_features_accumulated, label_ids
+
+
+def predict_basic_wav(train_config, model, dataloader, tqdm_desc):
+    model.eval()
+    # wait before starting progress bar
+    time.sleep(0.1)
+    
+    if train_config.verbose:
+        bar = tqdm(dataloader, desc=tqdm_desc, total=len(dataloader))
     else:
         bar = dataloader
         
-    item_features_list = []
+    items_features_list = []
     ids_list = []
     with torch.no_grad():
         
-        for item, ids in bar:
+        for item, attention_mask, ids in bar:
             ids_list.append(ids)
-            dataloader.set_label_ids(ids)
             
             with autocast():
                 item = item.to(train_config.device)
-                ids = ids.to(train_config.device)
-                first_item_feature = model(item)
-                
-                chunks_weights = dataloader.get_chunks_weights(ids)
-                chunks_weights = chunks_weights.to(train_config.device)
-
-                item_feature = first_item_feature * chunks_weights
-                dataloader.increment_next_chunk_counter() # to get next chunks in the next batch
-
-                next_chunks_batched = dataloader.get_next_chunks_batched(ids)
-                total_chunks = ceil(chunks_weights.reciprocal().sum().item() / dataloader.batch_size)  # Total number of chunk batches
-                chunk_pbar = tqdm(total=total_chunks, desc="Processing chunks", leave=False, initial=1)
-
-                while next_chunks_batched is not None:
-                    next_chunks, next_chunks_ids = next_chunks_batched
-                    next_chunks = next_chunks.to(train_config.device)
-                    next_chunks_ids = next_chunks_ids.to(train_config.device)
-                    next_chunks_feature = model(next_chunks)
-
-                    item_feature_summand = torch.zeros_like(item_feature)
-                    for i, id in enumerate(ids):
-                        mask = (next_chunks_ids == id)
-                        if mask.any():
-                            item_feature_summand[i] += next_chunks_feature[mask].sum(dim=0)
-
-                    item_feature += item_feature_summand * chunks_weights
-                    chunk_pbar.update(1)  
-
-                    next_chunks_batched = dataloader.get_next_chunks_batched(ids)
+                item_feature = model(item, attention_mask)
 
                 # normalize is calculated in fp32
                 if train_config.normalize_features:
                     item_feature = F.normalize(item_feature, dim=-1)
             
             # save features in fp32 for sim calculation
-            dataloader.reset_next_chunk_counter()
-            item_features_list.append(item_feature.to(torch.float32))
+            items_features_list.append(item_feature.to(torch.float32))
+            
         # keep Features on GPU
-        item_features = torch.cat(item_features_list, dim=0) 
+        items_features = torch.cat(item_features_list, dim=0) 
         ids_list = torch.cat(ids_list, dim=0).to(train_config.device)
         
     if train_config.verbose:
@@ -428,20 +338,75 @@ def predict_spectrograms_test(train_config, model, dataloader):
     return item_features, ids_list
 
 
+def predict_chunked_wav(train_config, model, dataloader):
+    model.eval()
+    # wait before starting progress bar
+    time.sleep(0.1)
+    
+    if train_config.verbose:
+        bar = tqdm(dataloader, desc="[CHUNKING ENABLED] Extract Query Features (Waveforms)", total=len(dataloader))
+    else:
+        bar = dataloader
+
+    with torch.no_grad(): # Disable gradient computation
+        # first initialisation (One Run):
+        sample, sample_attention_mask, _, _ = dataloader.dataset[0]
+        sample = sample.unsqueeze(0).to(train_config.device)
+        sample_attention_mask = sample_attention_mask.unsqueeze(0).to(train_config.device)
+        sample_feature = model(sample, sample_attention_mask)
+        item_feature_size = sample_feature.shape[1]
+        del sample_feature, sample_attention_mask
+
+        # initialisation of resulting wav_features_accumulated:
+        num_label_ids = dataloader.dataset.len_of_label_ids()
+        wav_features_accumulated = torch.zeros(num_label_ids, item_feature_size, device=train_config.device)
+
+        for wav_batch, attention_mask_batch, label_id_batch, weight_batch in bar:
+            # Enable mixed precision
+            with autocast(): 
+                wav_batch = wav_batch.to(train_config.device)
+                attention_mask_batch = attention_mask_batch.to(train_config.device)
+                weight_batch = weight_batch.to(train_config.device)
+                label_id_batch = label_id_batch.to(train_config.device)
+
+                wav_features = model(wav_batch, attention_mask_batch)
+                weight_batch = weight_batch.unsqueeze(1).expand_as(wav_features)
+                wav_features_weighted = weight_batch * wav_features
+
+                wav_features_accumulated.index_add_(0, label_id_batch, wav_features_weighted)
+
+        # normalize is calculated in fp32
+        if train_config.normalize_features:
+            wav_features_accumulated = F.normalize(wav_features_accumulated, dim=-1)
+
+        # save features in fp32 for sim calculation
+        wav_features_accumulated = wav_features_accumulated.to(torch.float32)
+
+        # creating label_ids using torch.arange() since spectro_features_accumulated is in order
+        label_ids = torch.arange(num_label_ids, dtype=torch.long).to(train_config.device)
+        
+    if train_config.verbose:
+        bar.close()
+        
+    return wav_features_accumulated, label_ids
+
 
 def get_predict_fct(dataloader):
-
-    if isinstance(dataloader.dataset, SpectroTestDataset):
-        return predict_spectrograms_test
-
-    elif isinstance(dataloader.dataset, SpectroEvalDataset):
-        return lambda **args: predict_basic(**args, tqdm_desc="Extract Query Features (Mel Spectrograms)")
-
-    elif isinstance(dataloader.dataset, WavEvalDataset):
-        return predict_wav_test
+    """Retrieve the appropriate prediction function based on the dataset configuration."""
+    if isinstance(dataloader.dataset, SpectroEvalDataset):
+        if dataloader.dataset.chunking == True:
+            return predict_chunked_spectrogram
+        else: 
+            return lambda train_config, model, dataloader: predict_basic_image(train_config, model, dataloader, tqdm_desc="Extract Query Features (Mel Spectrograms)")
 
     elif isinstance(dataloader.dataset, SatEvalDataset):
-        return lambda **args: predict_basic(**args, tqdm_desc="Extract Reference Features (Sat Images)")
+        return lambda train_config, model, dataloader: predict_basic_image(train_config, model, dataloader, tqdm_desc="Extract Reference Features (Sat Images)")
+
+    elif isinstance(dataloader.dataset, WavEvalDataset):
+        if dataloader.dataset.chunking == True:
+            return predict_chunked_wav
+        else: 
+            return lambda train_config, model, dataloader: predict_basic_wav(train_config, model, dataloader, tqdm_desc="Extract Query Features (Waveforms)")
 
     else:
-        return None
+        raise ValueError("No predict function for used dataset configuration found.")

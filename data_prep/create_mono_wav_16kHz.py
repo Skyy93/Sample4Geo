@@ -1,11 +1,12 @@
 import os
-import pandas as pd
+import librosa
 import warnings
-from tqdm import tqdm
 import datetime
 import numpy as np
-import librosa
+import pandas as pd
 import soundfile as sf
+
+from tqdm import tqdm
 
 warnings.filterwarnings('ignore')
 
@@ -55,21 +56,24 @@ def process_audio_file(audio_info):
     output_file_path = os.path.join(output_dir, f"{short_key}.wav")
     sf.write(output_file_path, audio, sr)  # Save the processed audio as WAV
 
-current_datetime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-simple_logprint(f"Starting conversion to 16kHz mono WAV files in directory: \"{output_dir}\"")
-simple_logprint(f"Process started at {current_datetime}")
 
-# Create the output directory if it does not exist
-os.makedirs(output_dir, exist_ok=True)
+# Main execution logic
+if __name__ == "__main__":
+    current_datetime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    simple_logprint(f"Starting conversion to 16kHz mono WAV files, to be stored in the directory: \"{output_dir}\"")
+    simple_logprint(f"Process started at {current_datetime}")
 
-# Get paths and short_keys to audio files from metadata
-audio_info = get_audio_paths(metadata_path)
-audio_info.sort(key=lambda x: x[1])  # Sort by short_key if needed
+    # Create the output directory if it does not exist
+    os.makedirs(output_dir, exist_ok=True)
 
-# Processing audio files
-for info in tqdm(audio_info):
-    process_audio_file(info)  # Any error here will crash the program
+    # Get paths and short_keys to audio files from metadata
+    audio_info = get_audio_paths(metadata_path)
+    audio_info.sort(key=lambda x: x[1])  # Sort by short_key if needed
 
-# Success message
-simple_logprint("\nSuccess! All samples have been successfully converted to .wav mono audio and saved.")
-simple_logprint("The processed files are located in the directory: '{}'".format(output_dir))
+    # Processing audio files
+    for info in tqdm(audio_info):
+        process_audio_file(info)  # Any error here will crash the program
+
+    # Success message
+    simple_logprint("\nSuccess! All samples have been successfully converted to .wav mono audio and saved.")
+    simple_logprint("The processed files are located in the directory: '{}'".format(output_dir))

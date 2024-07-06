@@ -1,16 +1,35 @@
 import os
+import re
+import sys
 import time
 import torch
-import sys
 
 from dataclasses import dataclass
-
 from torch.utils.data import DataLoader
-from spectrum4geo.dataset.soundingearth_wav2vec2 import Wav2Vec2SoundingEarthDatasetEval
-from spectrum4geo.transforms import get_transforms_val_sat
+
 from spectrum4geo.utils import Logger
-from spectrum4geo.evaluate.soundingearth import evaluate
 from spectrum4geo.model import TimmModelWav2Vec2
+from spectrum4geo.evaluate.metrics import evaluate
+from spectrum4geo.transforms import get_transforms_val_sat
+from spectrum4geo.dataset.evaluation import SatEvalDataset, WavEvalDataset, WavEvalDataLoader
+
+
+def extract_checkpoint_info(checkpoint_path):
+    # Split the path into parts by '/'
+    checkpoint_parts = checkpoint_path.split('/')
+
+    # Find the parts containing relevant information
+    mel_kHz_part = next(part for part in checkpoint_parts if part.endswith('kHz')).split('_')
+    patch_batch_part = next(part for part in checkpoint_parts if part.endswith('batch_size')).split('_')
+    shuffle_part = next(part for part in checkpoint_parts if part.startswith('Shuffle'))
+
+    # Extract values
+    sr_kHz = int(mel_kHz_part[2].replace('kHz', ''))
+    audio_length_s = int(patch_batch_part[0])
+    batch_size = int(patch_batch_part[4].replace('batch_size', ''))
+    shuffle = shuffle_part == 'Shuffle_On'
+
+    return sr_kHz, audio_length_s, batch_size, shuffle
 
 
 @dataclass
@@ -24,33 +43,24 @@ class Configuration:
     # facebook/wav2vec2-large-960h
     # facebook/wav2vec2-large-960h-lv60-self
 
+    checkpoint_start = 'soundingearth_wav2vec2/training/audio_length_15_s/Shuffle_Off/convnext_base.fb_in22k_ft_in1k_384/facebook/wav2vec2-large-960h/071505/weights_e40_7.0937.pth'   
+    sr_kHz, audio_length_s, batch_size, shuffle = extract_checkpoint_info(checkpoint_start)
+
     # Override model image size
-    img_size: int = 384                 # for satallite images
-    sr_kHz = 16
-    audio_length_s = 15 #old:15
-    
+    img_size: int = 384                                 # for satallite images
+
     # Evaluation
     batch_size_eval: int = 128
     verbose: bool = True
-    gpu_ids: tuple =  (0,1,2,3,4,5,6,7) # GPU ids for evaluating
+    gpu_ids: tuple =  (0,1,2,3,4,5,6,7)                 # GPU ids for evaluating
     normalize_features: bool = True
     
     # Savepath for model eval logs
-    custom_sampling: bool = False        # use custom sampling instead of random (not used during eval.)    
-    gps_sample: bool = False             # use gps sampling                      (not used during eval.)   
-    sim_sample: bool = False             # use similarity sampling               (not used during eval.)  
-
-    if custom_sampling and gps_sample and sim_sample:
-        model_path: str = f'./soundingearth_wav2vec2/testing/Shuffle_On/{audio_length_s}_s' 
-    else:
-        model_path: str = f'./soundingearth_wav2vec2/testing/Shuffle_Off/{audio_length_s}_s' 
+    log_path: str = f'./soundingearth_wav2vec2/testing/{sr_kHz}_kHz/{audio_length_s}_audio_length_s_{batch_size}_batch_size/{shuffle}' 
 
     # Dataset
     data_folder = 'data'        
     evaluate_csv = 'test_df.csv' 
-
-    # Checkpoint to start from
-    checkpoint_start = 'soundingearth_wav2vec2/training/audio_length_15_s/Shuffle_Off/convnext_base.fb_in22k_ft_in1k_384/facebook/wav2vec2-large-960h/071505/weights_e40_7.0937.pth'   
   
     # set num_workers to 0 if on Windows
     num_workers: int = 0 if os.name == 'nt' else 4 
@@ -70,7 +80,7 @@ if __name__ == '__main__':
     # Model                                                                       #
     #-----------------------------------------------------------------------------#
         
-    model_path = f'{config.model_path}/{config.model}/{config.model_wav2vec2}/{time.strftime('%H%M%S')}'
+    model_path = f'{config.log_path}/{time.strftime("%H%M%S")}'
 
     if not os.path.exists(model_path):
         os.makedirs(model_path)
@@ -128,43 +138,38 @@ if __name__ == '__main__':
                                                 std=std
                                                 )
     
-    # Satalite Satellite Images
-    sat_dataset_test = Wav2Vec2SoundingEarthDatasetEval(data_folder=config.data_folder ,
+    # Satellite Images (Reference)
+    sat_dataset_test = SatEvalDataset(data_folder=config.data_folder ,
                                       split_csv=config.evaluate_csv, 
-                                      query_type = 'sat',
                                       transforms=sat_transforms_val,
-                                      audio_length_s=config.audio_length_s,
-                                      sr_kHz=config.sr_kHz,
-                                      processor_wav2vec2=config.model_wav2vec2
                                       )
 
     sat_dataloader_test = DataLoader(sat_dataset_test,
                                      batch_size=config.batch_size_eval,
                                      num_workers=config.num_workers,
                                      shuffle=False,
-                                     pin_memory=True
+                                     pin_memory=True,
                                      )
     
-    # wave Data Test
-    wave_dataset_test = Wav2Vec2SoundingEarthDatasetEval(data_folder=config.data_folder,
-                                                         split_csv=config.evaluate_csv,
-                                                         query_type = 'audio',
-                                                         transforms=None,
-                                                         audio_length_s=config.audio_length_s,
-                                                         sr_kHz=config.sr_kHz,
-                                                         processor_wav2vec2=config.model_wav2vec2
-                                                         )
-    
-    wave_dataloader_test = DataLoader(wave_dataset_test,
-                                      batch_size=config.batch_size_eval,
-                                      num_workers=config.num_workers,
-                                      shuffle=False,
-                                      pin_memory=True,
-                                      collate_fn=wave_dataset_test.collate_fn
+    # Wav Data (Query)
+    wav_dataset_test = WavEvalDataset(data_folder=config.data_folder,
+                                      split_csv=config.evaluate_csv,
+                                      transforms=None,
+                                      audio_length_s=config.audio_length_s,
+                                      sr_kHz=config.sr_kHz,
+                                      processor_wav2vec2=config.model_wav2vec2
                                       )
     
+    wav_dataloader_test = WavEvalDataLoader(wav_dataset_test,
+                                            batch_size=config.batch_size_eval,
+                                            num_workers=config.num_workers,
+                                            shuffle=False,
+                                            pin_memory=True,
+                                            chunking=False
+                                            )
+    
     print('Reference (Sat) Images Test:', len(sat_dataset_test))
-    print('Reference (Wave) Wav2Vec Test:', len(wave_dataset_test))
+    print('Reference (Wav) Wav2Vec Test:', len(wav_dataset_test))
 
     #-----------------------------------------------------------------------------#
     # Evaluate                                                                    #
@@ -175,7 +180,20 @@ if __name__ == '__main__':
     r1_test = evaluate(config=config,
                        model=model,
                        reference_dataloader=sat_dataloader_test,
-                       query_dataloader=wave_dataloader_test, 
+                       query_dataloader=wav_dataloader_test, 
                        ranks=[1, 5, 10, 50, 100],
                        step_size=1000,
                        cleanup=True)  
+
+    print("\nNow starting Evaluation with [CHUNKING] enabled:\n")
+
+    wav_dataloader_test.switch_chunking(True)
+    
+    r1_test_chunked = evaluate(config=config,
+                               model=model,
+                               reference_dataloader=sat_dataloader_test,
+                               query_dataloader=wav_dataloader_test, 
+                               ranks=[1, 5, 10, 50, 100],
+                               step_size=1000,
+                               cleanup=True
+                               )  

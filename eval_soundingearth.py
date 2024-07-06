@@ -1,16 +1,36 @@
 import os
+import re
+import sys
 import time
 import torch
-import sys
 
 from dataclasses import dataclass
-
 from torch.utils.data import DataLoader
-from spectrum4geo.dataset.soundingearth_eval import SatEvalDataset, SpectroEvalDataset, SpectroTestDataset, SpectroTestDataloader
-from spectrum4geo.transforms import get_transforms_val_sat, get_transforms_val_spectro 
+
 from spectrum4geo.utils import Logger
-from spectrum4geo.evaluate.soundingearth import evaluate
 from spectrum4geo.model import TimmModel
+from spectrum4geo.evaluate.metrics import evaluate
+from spectrum4geo.dataset.evaluation import SatEvalDataset, SpectroEvalDataset
+from spectrum4geo.transforms import get_transforms_val_sat, get_transforms_val_spectro 
+
+
+def extract_checkpoint_info(checkpoint_path):
+    # Split the path into parts by '/'
+    checkpoint_parts = checkpoint_path.split('/')
+
+    # Find the parts containing relevant information
+    mel_kHz_part = next(part for part in checkpoint_parts if part.endswith('kHz')).split('_')
+    patch_batch_part = next(part for part in checkpoint_parts if part.endswith('batch_size')).split('_')
+    shuffle_part = next(part for part in checkpoint_parts if part.startswith('Shuffle'))
+
+    # Extract values
+    n_mels = int(mel_kHz_part[0])
+    sr_kHz = int(mel_kHz_part[2].replace('kHz', ''))
+    patch_time_steps = int(patch_batch_part[0])
+    batch_size = int(patch_batch_part[3].replace('batch_size', ''))
+    shuffle = shuffle_part == 'Shuffle_On'
+
+    return n_mels, sr_kHz, patch_time_steps, batch_size, shuffle
 
 
 @dataclass
@@ -18,36 +38,31 @@ class Configuration:
     
     # Model
     model: str = 'convnext_base.fb_in22k_ft_in1k_384'
-    
+
+    checkpoint_start = "backup/runs before new shuffeling/soundingearth/training/convnext_base.fb_in22k_ft_in1k_384/old/before_eval_middle/48kHz_128mel/1024_patch_width/205032/weights_e40_9.0373.pth"
+    #n_mels, sr_kHz, patch_time_steps, batch_size, shuffle = extract_checkpoint_info(checkpoint_start)
+    n_mels, sr_kHz, patch_time_steps, batch_size, shuffle = 128, 48, 1024, 64, "BEFORE_SPLIT!!!"
+
     # Override model image size
-    img_size: int = 384                  # for satallite images
-    patch_time_steps: int = 1024         # Image size for spectrograms (Width)
-    n_mels: int = 128                    # image size for spectrograms (Height)
-    sr_kHz: float = 48
+    img_size: int = 384                                             # for satallite images
     
     # Evaluation
-    batch_size_eval: int = 64
+    batch_size_eval: int = 64*8 
     verbose: bool = True
-    gpu_ids: tuple =  (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)          # GPU ids for evaluating
+    gpu_ids: tuple =  (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)       # GPU ids for evaluating
     normalize_features: bool = True
     
     # Savepath for model eval logs
-    custom_sampling: bool = False        # use custom sampling instead of random (not used during eval.)    
-    gps_sample: bool = False             # use gps sampling                      (not used during eval.)   
-    sim_sample: bool = False             # use similarity sampling               (not used during eval.)  
-    
-    if custom_sampling and gps_sample and sim_sample:
-        model_path: str = f'./soundingearth/testing/Shuffle_On/{n_mels}_mel_{sr_kHz}_kHz' 
-    else:
-        model_path: str = f'./soundingearth/testing/Shuffle_Off/{n_mels}_mel_{sr_kHz}_kHz' 
+    log_path: str = f'./soundingearth/testing/{n_mels}_mel_{sr_kHz}_kHz/{patch_time_steps}_patch_width_{batch_size}_batch_size/{shuffle}' 
 
     # Dataset
     data_folder = 'data'        
     evaluate_csv = 'test_df.csv' 
 
     # Checkpoint to start from
-    checkpoint_start = 'backup/runs before new shuffeling/soundingearth/training/convnext_base.fb_in22k_ft_in1k_384/old/before_eval_middle/48kHz_128mel/1024_patch_width/205032/weights_end.pth'   
-  
+    # checkpoint_start = 'backup/runs before new shuffeling/soundingearth/training/convnext_base.fb_in22k_ft_in1k_384/old/before_eval_middle/48kHz_128mel/24576_patch_width/103639/weights_e36_10.3929.pth'   
+    # 1024 checkpoint_start = 'backup/runs before new shuffeling/soundingearth/training/convnext_base.fb_in22k_ft_in1k_384/old/before_eval_middle/48kHz_128mel/1024_patch_width/205032/weights_end.pth'   
+
     # set num_workers to 0 if on Windows
     num_workers: int = 0 if os.name == 'nt' else 4 
     
@@ -66,7 +81,7 @@ if __name__ == '__main__':
     # Model                                                                       #
     #-----------------------------------------------------------------------------#
         
-    model_path = f'{config.model_path}/{config.model}/{time.strftime('%H%M%S')}'
+    model_path = f'{config.log_path}/{time.strftime("%H%M%S")}'
 
     if not os.path.exists(model_path):
         os.makedirs(model_path)
@@ -132,7 +147,7 @@ if __name__ == '__main__':
                                                         std=std
                                                         )        
 
-    # Satalite Satellite Images
+    # Satellite Images (Reference)
     sat_dataset_test = SatEvalDataset(data_folder=config.data_folder ,
                                       split_csv=config.evaluate_csv, 
                                       transforms=sat_transforms_val,
@@ -145,24 +160,26 @@ if __name__ == '__main__':
                                      pin_memory=True
                                      )
     
-    # Spectrogram Images Test
-    spectro_dataset_test = SpectroTestDataset(data_folder=config.data_folder ,
-                                      split_csv=config.evaluate_csv, 
-                                      transforms=spectro_transforms_val,
-                                      patch_time_steps=config.patch_time_steps,
-                                      sr_kHz=config.sr_kHz,
-                                      n_mels=config.n_mels,
-                                      stride=None,
-                                      min_frame=None,
-                                      )
+    # Spectrogram Images (Query)
+    spectro_dataset_test = SpectroEvalDataset(data_folder=config.data_folder ,
+                                              split_csv=config.evaluate_csv, 
+                                              transforms=spectro_transforms_val,
+                                              patch_time_steps=config.patch_time_steps,
+                                              sr_kHz=config.sr_kHz,
+                                              n_mels=config.n_mels,
+                                              #stride=config.patch_time_steps//2,
+                                              min_frame=None,
+                                              chunking=False,
+                                              dB_power_weights=False,
+                                              use_power_weights=True,
+                                              )
     
-    spectro_dataloader_test = SpectroTestDataloader(spectro_dataset_test,
-                                       batch_size=config.batch_size_eval,
-                                       num_workers=config.num_workers,
-                                       shuffle=False,
-                                       pin_memory=True,
-                                       chunking=True
-                                       )
+    spectro_dataloader_test = DataLoader(spectro_dataset_test,
+                                         batch_size=config.batch_size_eval,
+                                         num_workers=config.num_workers,
+                                         shuffle=False,
+                                         pin_memory=True,
+                                         )
     
     print('Reference (Sat) Images Test:', len(sat_dataset_test))
     print('Reference (Spectro) Wav2Vec Test:', len(spectro_dataset_test))
@@ -179,4 +196,19 @@ if __name__ == '__main__':
                        query_dataloader=spectro_dataloader_test, 
                        ranks=[1, 5, 10, 50, 100],
                        step_size=1000,
-                       cleanup=True)  
+                       cleanup=True
+                       )  
+
+
+    print("\nNow starting Evaluation with [CHUNKING] enabled:\n")
+
+    query_dataloader.dataset.switch_chunking(True)
+    
+    r1_test_chunked = evaluate(config=config,
+                               model=model,
+                               reference_dataloader=sat_dataloader_test,
+                               query_dataloader=spectro_dataloader_test, 
+                               ranks=[1, 5, 10, 50, 100],
+                               step_size=1000,
+                               cleanup=True
+                               )  

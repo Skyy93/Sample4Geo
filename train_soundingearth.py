@@ -1,31 +1,24 @@
 import os
-import time
-import shutil
 import sys
+import time
 import torch
 import pickle
+import shutil
 
-from math import ceil
 from dataclasses import dataclass
 from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader
 from transformers import get_constant_schedule_with_warmup, get_polynomial_decay_schedule_with_warmup, get_cosine_schedule_with_warmup
 
-from spectrum4geo.dataset.soundingearth_eval import SatEvalDataset, SpectroEvalDataset
-from spectrum4geo.dataset.soundingearth_train import SatSpectroTrainDataset
-from spectrum4geo.transforms import get_transforms_train_sat, get_transforms_train_spectro 
-from spectrum4geo.transforms import get_transforms_val_sat, get_transforms_val_spectro 
-from spectrum4geo.utils import setup_system, Logger
-from spectrum4geo.trainer import train
-from spectrum4geo.evaluate.soundingearth import evaluate, calc_sim
 from spectrum4geo.loss import InfoNCE
+from spectrum4geo.trainer import train
 from spectrum4geo.model import TimmModel
-
-patch_widt_opti = 16384
-n_mels_opti = 128
-batch_size_opti = 80
-
-product_opti = n_mels_opti * patch_widt_opti
+from spectrum4geo.utils import setup_system, Logger
+from spectrum4geo.evaluate.metrics import evaluate, calc_sim
+from spectrum4geo.dataset.training import SatSpectroTrainDataset
+from spectrum4geo.dataset.evaluation import SatEvalDataset, SpectroEvalDataset
+from spectrum4geo.transforms import get_transforms_val_sat, get_transforms_val_spectro 
+from spectrum4geo.transforms import get_transforms_train_sat, get_transforms_train_spectro 
 
 
 @dataclass
@@ -38,31 +31,28 @@ class Configuration:
     patch_time_steps: int = 16384       # Image size for spectrograms (Width)
     n_mels: int = 128                   # image size for spectrograms (Height)
     sr_kHz: float = 48
-    
+
     # Training 
+    batch_size: int = 64                                       # keep in mind real_batch_size = 2 * batch_size
     mixed_precision: bool = True
     seed = 42
     epochs: int = 40
     verbose: bool = True
-    gpu_ids: tuple =  (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)         # GPU ids for training
-    #gpu_ids: tuple = (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)   # GPU ids for training
+    gpu_ids: tuple =  (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)  # GPU ids for training
     
-    # Calculate the batch size to optimally fill GPU memory
-    batch_size: int = round(((patch_time_steps * n_mels) / product_opti) / len(gpu_ids) * batch_size_opti) * len(gpu_ids)
+    # Eval
+    batch_size_eval: int = 48
+    eval_every_n_epoch: int = 4                  # eval every n Epoch
+    normalize_features: bool = True
     
     # Similarity Sampling
     custom_sampling: bool = False                # use custom sampling instead of random     -> To False for not using shuffle function of dataloader!
     gps_sample: bool = False                     # use gps sampling                          -> To False for not using shuffle function of dataloader!
     sim_sample: bool = False                     # use similarity sampling                   -> To False for not using shuffle function of dataloader!
-    neighbour_select: int = 64                  # max selection size from pool
-    neighbour_range: int = 128                  # pool size for selection
-    gps_dict_path: str = 'data/gps_dict.pkl'    # path to pre-computed distances
+    neighbour_select: int = 64                   # max selection size from pool
+    neighbour_range: int = 128                   # pool size for selection
+    gps_dict_path: str = 'data/gps_dict.pkl'     # path to pre-computed distances
  
-    # Eval
-    batch_size_eval: int = 64
-    eval_every_n_epoch: int = 4         # eval every n Epoch
-    normalize_features: bool = True
-
     # Optimizer 
     clip_grad = 100.                    # None | float
     decay_exclue_bias: bool = False
@@ -88,9 +78,9 @@ class Configuration:
     
     # Savepath for model checkpoints
     if custom_sampling and gps_sample and sim_sample:
-        model_path: str = f'./soundingearth/training/{n_mels}_mel_{sr_kHz}_kHz/Shuffle_On' 
+        model_path: str = f'./soundingearth/training/{n_mels}_mel_{sr_kHz}_kHz/{patch_time_steps}_patch_width_{batch_size}_batch_size/Shuffle_On' 
     else:
-        model_path: str = f'./soundingearth/training/{n_mels}_mel_{sr_kHz}_kHz/Shuffle_Off' 
+        model_path: str = f'./soundingearth/training/{n_mels}_mel_{sr_kHz}_kHz/{patch_time_steps}_patch_width_{batch_size}_batch_size/Shuffle_Off' 
 
     # Eval before training
     zero_shot: bool = False 
@@ -118,7 +108,7 @@ config = Configuration()
 
 if __name__ == '__main__':
 
-    model_path = f'{config.model_path}/{config.model}/{time.strftime('%H%M%S')}'
+    model_path = f'{config.model_path}/{config.model}/{time.strftime("%H%M%S")}'
 
     if not os.path.exists(model_path):
         os.makedirs(model_path)
@@ -203,17 +193,17 @@ if __name__ == '__main__':
                                                                   
     # Train
     train_dataset = SatSpectroTrainDataset(data_folder=config.data_folder,
-                                              split_csv=config.train_csv,
-                                              transforms_sat_image=sat_transforms_train,
-                                              transforms_spectrogram=spectro_transforms_train,
-                                              patch_time_steps=config.patch_time_steps,
-                                              sr_kHz=config.sr_kHz,
-                                              n_mels=config.n_mels,
-                                              prob_flip=config.prob_flip,
-                                              prob_rotate=config.prob_rotate,
-                                              shuffle_batch_size=config.batch_size
-                                              )
-    
+                                           split_csv=config.train_csv,
+                                           transforms_sat_image=sat_transforms_train,
+                                           transforms_spectrogram=spectro_transforms_train,
+                                           patch_time_steps=config.patch_time_steps,
+                                           sr_kHz=config.sr_kHz,
+                                           n_mels=config.n_mels,
+                                           prob_flip=config.prob_flip,
+                                           prob_rotate=config.prob_rotate,
+                                           shuffle_batch_size=config.batch_size
+                                           )   
+
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=config.batch_size,
                                   num_workers=config.num_workers,
@@ -231,11 +221,11 @@ if __name__ == '__main__':
                                                         std=std
                                                         )        
 
-    # Reference Satellite Images
+    # Satellite Images (Reference)
     sat_dataset_test = SatEvalDataset(data_folder=config.data_folder,
-                                                split_csv=config.evaluate_csv,
-                                                transforms=sat_transforms_val,
-                                                )
+                                      split_csv=config.evaluate_csv,
+                                      transforms=sat_transforms_val,
+                                      )
     
     sat_dataloader_test = DataLoader(sat_dataset_test,
                                      batch_size=config.batch_size_eval,
@@ -244,14 +234,14 @@ if __name__ == '__main__':
                                      pin_memory=True
                                      )
     
-    # Reference Spectrogram Images
+    # Spectrogram Images (Query)
     spectro_dataset_test = SpectroEvalDataset(data_folder=config.data_folder ,
-                                                    split_csv=config.evaluate_csv,
-                                                    transforms=spectro_transforms_val,
-                                                    patch_time_steps=config.patch_time_steps,
-                                                    sr_kHz=config.sr_kHz,
-                                                    n_mels=config.n_mels,
-                                                    )
+                                              split_csv=config.evaluate_csv,
+                                              transforms=spectro_transforms_val,
+                                              patch_time_steps=config.patch_time_steps,
+                                              sr_kHz=config.sr_kHz,
+                                              n_mels=config.n_mels,
+                                              )
     
     spectro_dataloader_test = DataLoader(spectro_dataset_test,
                                          batch_size=config.batch_size_eval,
@@ -279,14 +269,14 @@ if __name__ == '__main__':
     
     if config.sim_sample:
     
-        # Query Spectrogram Images Train for simsampling
+        # Spectrogram Images (Query): train-split for simsampling
         spectro_dataset_train = SatEvalDataset(data_folder=config.data_folder ,
-                                                    split_csv=config.train_csv,
-                                                    transforms=spectro_transforms_val,
-                                                    patch_time_steps=config.patch_time_steps,
-                                                    sr_kHz=config.sr_kHz,
-                                                    n_mels=config.n_mels,
-                                                    )
+                                               split_csv=config.train_csv,
+                                               transforms=spectro_transforms_val,
+                                               patch_time_steps=config.patch_time_steps,
+                                               sr_kHz=config.sr_kHz,
+                                               n_mels=config.n_mels,
+                                               )
             
         spectro_dataloader_train = DataLoader(spectro_dataset_train,
                                               batch_size=config.batch_size_eval,
@@ -296,10 +286,9 @@ if __name__ == '__main__':
                                               )
         
         sat_dataset_train = SatEvalDataset(data_folder=config.data_folder,
-                                                     split_csv=config.train_csv,
-                                                     query_type = 'sat',
-                                                     transforms=sat_transforms_val,
-                                                     )
+                                           split_csv=config.train_csv,
+                                           transforms=sat_transforms_val,
+                                           )
         
         sat_dataloader_train = DataLoader(sat_dataset_train,
                                           batch_size=config.batch_size_eval,
