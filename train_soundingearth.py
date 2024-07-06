@@ -426,7 +426,7 @@ if __name__ == '__main__':
                            scaler=scaler
                            )
         
-        print(f'Epoch: {epoch}, Train Loss = {train_loss:.3f}, Lr = {optimizer.param_groups[0]['lr']:.6f}')
+        print(f'Epoch: {epoch}, Train Loss = {train_loss:.3f}, Lr = {optimizer.param_groups[0]["lr"]:.6f}')
         
         # evaluate
         if (epoch % config.eval_every_n_epoch == 0 and epoch != 0) or epoch == config.epochs:
