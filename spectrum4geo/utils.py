@@ -4,6 +4,7 @@ import random
 import errno
 import time
 import torch
+import hashlib
 import numpy as np
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
@@ -92,6 +93,17 @@ class Logger(object):
         if self.file is not None:
             self.file.close()
 
+    def set_log_file(self, fpath):
+        """Set a new log file, closing the old one if it exists."""
+        if self.file is not None:
+            self.file.flush()
+            self.file.close()
+        if fpath is not None:
+            mkdir_if_missing(os.path.dirname(fpath))
+            self.file = open(fpath, 'w')
+        else:
+            self.file = None
+
 
 def sec_to_min(seconds):
     
@@ -137,3 +149,16 @@ class Customizable:
         self.name = name
     def __get__(self, instance, owner):
         return instance.__dict__.get(self.name, self.method.__get__(instance, owner))
+    
+
+def deterministic_seed(seed, idx):
+    # Encode the seed and index into a string and convert it to bytes
+    hash_input = f"{seed}_{idx}".encode()
+    
+    # Create a SHA256 hash object from the encoded input
+    hash_object = hashlib.sha256(hash_input)
+    
+    # Convert the hash to a 32-bit integer
+    hash_int = int(hash_object.hexdigest(), 16) & 0xFFFFFFFF  # Limiting to 32-bit
+    
+    return hash_int

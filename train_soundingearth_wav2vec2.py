@@ -5,6 +5,7 @@ import torch
 import pickle
 import shutil
 
+from math import sqrt
 from dataclasses import dataclass
 from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader
@@ -15,8 +16,8 @@ from spectrum4geo.model import TimmModelWav2Vec2
 from spectrum4geo.utils import setup_system, Logger
 from spectrum4geo.trainer import train_wav2vec2 as train
 from spectrum4geo.transforms import get_transforms_val_sat
-from spectrum4geo.evaluate.soundingearth import evaluate, calc_sim
-from spectrum4geo.dataset.training import SatSpectroTrainDataset, SatWavTrainDataset
+from spectrum4geo.evaluate.metrics import evaluate, calc_sim
+from spectrum4geo.dataset.training import SatWavTrainDataset
 from spectrum4geo.transforms import get_transforms_train_sat, get_transforms_train_wave 
 from spectrum4geo.dataset.evaluation import SatEvalDataset, WavEvalDataset, WavEvalDataLoader
 
@@ -34,18 +35,20 @@ class Configuration:
     # Override model image size
     img_size: int = 384                 # for satallite images
     sr_kHz = 16
-    audio_length_s = 15 #old:15
+    audio_length_s = 30 # teste erst 10, dann 30, 25, 20, 15
+    # -> nach guter Parameterisierung mit 10 unbedingt die noise entfernten samples testen (vorher noch das eine vermisste kopieren)
 
     # Training 
-    batch_size: int = 64                                        # keep in mind real_batch_size = 2 * batch_size
+    batch_size: int = 48                # keep in mind real_batch_size = 2 * batch_size
     mixed_precision: bool = True
     seed = 42
-    epochs: int = 50
+    epochs: int = 50 # later 50
     verbose: bool = True
-    gpu_ids: tuple =  (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)   # GPU ids for training
+    gpu_ids: tuple =  (0,1,2,3,4,5,6,7,
+                       8,9,10,11,12,13,14,15)   # GPU ids for training
 
     # Eval
-    batch_size_eval: int = 64
+    batch_size_eval: int = 48
     eval_every_n_epoch: int = 4                 # eval every n Epoch
     normalize_features: bool = True
 
@@ -66,8 +69,8 @@ class Configuration:
     label_smoothing: float = 0.1
     
     # Learning Rate
-    lr_base: float = 0.001              # 1 * 10^-4 for ViT | 1 * 10^-1 for CNN
-    lr_wav2vec2: float = 0.00001
+    lr_base: float = 0.00075 * sqrt(80/192)             # 1 * 10^-4 for ViT | 1 * 10^-1 for CNN
+    lr_wav2vec2: float = 0.00005 * sqrt(80/192) 
     scheduler_base: str = 'cosine'      # 'polynomial' | 'cosine' | 'constant' | None
     scheduler_wav2vec2: str = 'cosine'
     lr_base_end: float = 0.0001         #  only for 'polynomial'
@@ -115,7 +118,7 @@ config = Configuration()
 
 if __name__ == '__main__':
 
-    model_path = f'{config.model_path}/{config.model}/{time.strftime("%H%M%S")}'
+    model_path = f'{config.model_path}/{config.model}/{time.strftime("%H%M%S")}_{config.lr_base:.3g}_lr_{config.lr_wav2vec2}_lr_wav2vec2'
 
     if not os.path.exists(model_path):
         os.makedirs(model_path)
@@ -241,7 +244,7 @@ if __name__ == '__main__':
                                       processor_wav2vec2=config.model_wav2vec2
                                       )
     
-    wav_dataloader_test = DataLoader(wave_dataset_test,
+    wav_dataloader_test = WavEvalDataLoader(wav_dataset_test,
                                      batch_size=config.batch_size_eval,
                                      num_workers=config.num_workers,
                                      shuffle=False,
@@ -250,7 +253,7 @@ if __name__ == '__main__':
                                      )
     
     print('\nReference (Sat) Images Test:', len(sat_dataset_test))
-    print('Reference (Wave) Wav2Vec Test:', len(wave_dataset_test))
+    print('Query (Wave) Wav2Vec Test:', len(wav_dataset_test))
     
     #-----------------------------------------------------------------------------#
     # GPS Sample                                                                  #
@@ -500,3 +503,15 @@ if __name__ == '__main__':
         torch.save(model.module.state_dict(), f'{model_path}/weights_end.pth')
     else:
         torch.save(model.state_dict(), f'{model_path}/weights_end.pth')            
+
+    # Perform one final evaluation with chunking enabled
+    wav_dataloader_test.switch_chunking(True)
+
+    evaluate(config=config,
+             model=model,
+             reference_dataloader=sat_dataloader_test,
+             query_dataloader=wav_dataloader_test, 
+             ranks=[1, 5, 10, 50, 100],
+             step_size=1000,
+             cleanup=True
+             )

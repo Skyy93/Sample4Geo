@@ -169,3 +169,5 @@ cvusa/
 tensorflow_test.py
 
 backup/
+
+eval_geoclap.ipynb

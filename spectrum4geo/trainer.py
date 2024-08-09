@@ -9,7 +9,9 @@ from .utils import AverageMeter
 from torch.cuda.amp import autocast
 from collections import defaultdict
 
+from spectrum4geo.dataset.training import SpectroSimDataset
 from spectrum4geo.dataset.evaluation import SatEvalDataset, SpectroEvalDataset, WavEvalDataset
+
 
 
 def train(train_config, model, dataloader, loss_function, optimizer, scheduler, scaler=None):
@@ -28,12 +30,12 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler, 
         bar = dataloader
     
     # for loop over one epoch
-    for sat_img, reference, ids in bar: 
+    for sat_img, query, ids in bar: 
         if scaler:
             with autocast():
                 # data (batches) to device   
                 sat_img = sat_img.to(train_config.device)
-                features1, features2 = model(sat_img, reference.to(train_config.device))
+                features1, features2 = model(sat_img, query.to(train_config.device))
                 # Forward pass
                 if torch.cuda.device_count() > 1 and len(train_config.gpu_ids) > 1: 
                     loss = loss_function(features1, features2, model.module.logit_scale.exp())
@@ -59,7 +61,7 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler, 
         else:
             # data (batches) to device   
             sat_img = sat_img.to(train_config.device)
-            features1, features2 = model(sat_img, reference.to(train_config.device))
+            features1, features2 = model(sat_img, query.to(train_config.device))
 
             if torch.cuda.device_count() > 1 and len(train_config.gpu_ids) > 1: 
                 loss = loss_function(features1, features2, model.module.logit_scale.exp())
@@ -118,14 +120,14 @@ def train_wav2vec2(train_config, model, dataloader, loss_function, optimizer_lis
         bar = dataloader
     
     # for loop over one epoch
-    for sat_img, reference, ids in bar: 
+    for sat_img, query, attention_mask, ids in bar: 
         if scaler:
             with autocast():
                 # data (batches) to device   
                 sat_img = sat_img.to(train_config.device)
 
-                waveform = reference[0].to(train_config.device)
-                attention_mask = reference[1].to(train_config.device)
+                waveform = query.to(train_config.device)
+                attention_mask = attention_mask.to(train_config.device)
                 features1, features2 = model(sat_img, waveform, attention_mask=attention_mask)
 
                 if torch.cuda.device_count() > 1 and len(train_config.gpu_ids) > 1: 
@@ -158,8 +160,8 @@ def train_wav2vec2(train_config, model, dataloader, loss_function, optimizer_lis
             # data (batches) to device   
             sat_img = sat_img.to(train_config.device)
 
-            waveform = reference[0].to(train_config.device)
-            attention_mask = reference[1].to(train_config.device)
+            waveform = query.to(train_config.device)
+            attention_mask = attention_mask.to(train_config.device)
             features1, features2 = model(sat_img, waveform, attention_mask=attention_mask)
 
             if torch.cuda.device_count() > 1 and len(train_config.gpu_ids) > 1: 
@@ -319,7 +321,7 @@ def predict_basic_wav(train_config, model, dataloader, tqdm_desc):
             
             with autocast():
                 item = item.to(train_config.device)
-                item_feature = model(item, attention_mask)
+                item_feature = model(item, attention_mask=attention_mask)
 
                 # normalize is calculated in fp32
                 if train_config.normalize_features:
@@ -329,13 +331,13 @@ def predict_basic_wav(train_config, model, dataloader, tqdm_desc):
             items_features_list.append(item_feature.to(torch.float32))
             
         # keep Features on GPU
-        items_features = torch.cat(item_features_list, dim=0) 
+        items_features = torch.cat(items_features_list, dim=0) 
         ids_list = torch.cat(ids_list, dim=0).to(train_config.device)
         
     if train_config.verbose:
         bar.close()
         
-    return item_features, ids_list
+    return items_features, ids_list
 
 
 def predict_chunked_wav(train_config, model, dataloader):
@@ -350,12 +352,22 @@ def predict_chunked_wav(train_config, model, dataloader):
 
     with torch.no_grad(): # Disable gradient computation
         # first initialisation (One Run):
-        sample, sample_attention_mask, _, _ = dataloader.dataset[0]
-        sample = sample.unsqueeze(0).to(train_config.device)
-        sample_attention_mask = sample_attention_mask.unsqueeze(0).to(train_config.device)
-        sample_feature = model(sample, sample_attention_mask)
+        wav, _, _ = dataloader.dataset[0]
+        wav_padded = dataloader.dataset.processor(wav, 
+                                                  sampling_rate=dataloader.dataset.sample_rate, 
+                                                  return_tensors="pt", 
+                                                  padding=True, 
+                                                  truncation=True, 
+                                                  return_attention_mask=True,
+                                                  max_length=dataloader.dataset.sample_length
+                                                  )
+        sample = wav_padded['input_values']
+        sample_attention_mask = wav_padded['attention_mask']
+        sample = sample.to(train_config.device)
+        sample_attention_mask = sample_attention_mask.to(train_config.device)
+        sample_feature = model(sample, attention_mask=sample_attention_mask)
         item_feature_size = sample_feature.shape[1]
-        del sample_feature, sample_attention_mask
+        del sample_feature, sample_attention_mask, wav_padded
 
         # initialisation of resulting wav_features_accumulated:
         num_label_ids = dataloader.dataset.len_of_label_ids()
@@ -369,7 +381,7 @@ def predict_chunked_wav(train_config, model, dataloader):
                 weight_batch = weight_batch.to(train_config.device)
                 label_id_batch = label_id_batch.to(train_config.device)
 
-                wav_features = model(wav_batch, attention_mask_batch)
+                wav_features = model(wav_batch, attention_mask=attention_mask_batch)
                 weight_batch = weight_batch.unsqueeze(1).expand_as(wav_features)
                 wav_features_weighted = weight_batch * wav_features
 
@@ -399,6 +411,9 @@ def get_predict_fct(dataloader):
         else: 
             return lambda train_config, model, dataloader: predict_basic_image(train_config, model, dataloader, tqdm_desc="Extract Query Features (Mel Spectrograms)")
 
+    elif isinstance(dataloader.dataset, SpectroSimDataset):
+        return lambda train_config, model, dataloader: predict_basic_image(train_config, model, dataloader, tqdm_desc="[FOR SIMILARITY SAMPLING] Extract Query Features (Mel Spectrograms)")
+
     elif isinstance(dataloader.dataset, SatEvalDataset):
         return lambda train_config, model, dataloader: predict_basic_image(train_config, model, dataloader, tqdm_desc="Extract Reference Features (Sat Images)")
 
@@ -407,6 +422,5 @@ def get_predict_fct(dataloader):
             return predict_chunked_wav
         else: 
             return lambda train_config, model, dataloader: predict_basic_wav(train_config, model, dataloader, tqdm_desc="Extract Query Features (Waveforms)")
-
     else:
         raise ValueError("No predict function for used dataset configuration found.")

@@ -15,6 +15,7 @@ from spectrum4geo.transforms import get_transforms_val_sat, get_transforms_val_s
 
 
 def extract_checkpoint_info(checkpoint_path):
+    print(checkpoint_path)
     # Split the path into parts by '/'
     checkpoint_parts = checkpoint_path.split('/')
 
@@ -25,7 +26,7 @@ def extract_checkpoint_info(checkpoint_path):
 
     # Extract values
     n_mels = int(mel_kHz_part[0])
-    sr_kHz = int(mel_kHz_part[2].replace('kHz', ''))
+    sr_kHz = int(mel_kHz_part[2].replace('kHz', ''))  # Changed to float to handle values like 22.05
     patch_time_steps = int(patch_batch_part[0])
     batch_size = int(patch_batch_part[3].replace('batch_size', ''))
     shuffle = shuffle_part == 'Shuffle_On'
@@ -39,9 +40,9 @@ class Configuration:
     # Model
     model: str = 'convnext_base.fb_in22k_ft_in1k_384'
 
-    checkpoint_start = "backup/runs before new shuffeling/soundingearth/training/convnext_base.fb_in22k_ft_in1k_384/old/before_eval_middle/48kHz_128mel/1024_patch_width/205032/weights_e40_9.0373.pth"
-    #n_mels, sr_kHz, patch_time_steps, batch_size, shuffle = extract_checkpoint_info(checkpoint_start)
-    n_mels, sr_kHz, patch_time_steps, batch_size, shuffle = 128, 48, 1024, 64, "BEFORE_SPLIT!!!"
+    checkpoint_start = 'soundingearth/training/128_mel_48_kHz/4096_patch_width_256_batch_size/Shuffle_On/convnext_base.fb_in22k_ft_in1k_384/015408_0.001_neighbour_select32_furthest_GPS_Sampling/weights_e4_4.2248.pth'   
+    n_mels, sr_kHz, patch_time_steps, batch_size, shuffle = extract_checkpoint_info(checkpoint_start)
+    #n_mels, sr_kHz, patch_time_steps, batch_size, shuffle = 128, 48, 1024, 64, "BEFORE_SPLIT!!!"
 
     # Override model image size
     img_size: int = 384                                             # for satallite images
@@ -53,15 +54,14 @@ class Configuration:
     normalize_features: bool = True
     
     # Savepath for model eval logs
-    log_path: str = f'./soundingearth/testing/{n_mels}_mel_{sr_kHz}_kHz/{patch_time_steps}_patch_width_{batch_size}_batch_size/{shuffle}' 
+    if shuffle == True:
+        log_path: str = f'./soundingearth/testing/{n_mels}_mel_{sr_kHz}_kHz/{patch_time_steps}_patch_width_{batch_size}_batch_size/Shuffle_On'
+    else:
+        log_path: str = f'./soundingearth/testing/{n_mels}_mel_{sr_kHz}_kHz/{patch_time_steps}_patch_width_{batch_size}_batch_size/Shuffle_Off'
 
     # Dataset
     data_folder = 'data'        
     evaluate_csv = 'test_df.csv' 
-
-    # Checkpoint to start from
-    # checkpoint_start = 'backup/runs before new shuffeling/soundingearth/training/convnext_base.fb_in22k_ft_in1k_384/old/before_eval_middle/48kHz_128mel/24576_patch_width/103639/weights_e36_10.3929.pth'   
-    # 1024 checkpoint_start = 'backup/runs before new shuffeling/soundingearth/training/convnext_base.fb_in22k_ft_in1k_384/old/before_eval_middle/48kHz_128mel/1024_patch_width/205032/weights_end.pth'   
 
     # set num_workers to 0 if on Windows
     num_workers: int = 0 if os.name == 'nt' else 4 
@@ -76,28 +76,53 @@ class Configuration:
 config = Configuration() 
 
 if __name__ == '__main__':
+            
+    # Directory path
+    directory = "soundingearth/training/"
 
+    # Redirect print to both console and log file
+    sys.stdout = Logger(os.path.join('soundingearth/testing/', 'init_log.txt'))
+    logger = sys.stdout
+
+    # directory_list = [
+    #     "soundingearth/training/128_mel_48_kHz/4096_patch_width_256_batch_size/Shuffle_On/convnext_base.fb_in22k_ft_in1k_384/121755_0.001_lr/weights_end.pth",
+    # ]
+
+#    striding_list = [None,1024,2048,3072]
+#
+#    # Iterate through files in the directory list
+#    #for checkpoint_path in directory_list:
+#    for stride in striding_list:
+#        # also test "soundingearth/training/128_mel_48_kHz/4096_patch_width_256_batch_size/Shuffle_Off/convnext_base.fb_in22k_ft_in1k_384/020318_0.001_lr_best/weights_e36_16.4472.pth"
+#        config.checkpoint_start = "soundingearth/training/128_mel_48_kHz/4096_patch_width_256_batch_size/Shuffle_Off/convnext_base.fb_in22k_ft_in1k_384/020318_0.001_lr_best/weights_end.pth"
+#        config.n_mels, config.sr_kHz, config.patch_time_steps, config.batch_size, config.shuffle = extract_checkpoint_info(config.checkpoint_start)
+#        config.batch_size_eval = config.batch_size
+#
+#        if config.shuffle == True:
+#            config.log_path = f'./soundingearth/testing/{config.n_mels}_mel_{config.sr_kHz}_kHz/{config.patch_time_steps}_patch_width_{config.batch_size}_batch_size/Shuffle_On'
+#        else:
+#            config.log_path = f'./soundingearth/testing/{config.n_mels}_mel_{config.sr_kHz}_kHz/{config.patch_time_steps}_patch_width_{config.batch_size}_batch_size/Shuffle_Off'
+#
     #-----------------------------------------------------------------------------#
     # Model                                                                       #
     #-----------------------------------------------------------------------------#
         
-    model_path = f'{config.log_path}/{time.strftime("%H%M%S")}'
+    model_path = f'{config.log_path}/{time.strftime("%H%M%S")}_gps_furthest_episode_4'
 
     if not os.path.exists(model_path):
         os.makedirs(model_path)
 
-    # Redirect print to both console and log file
-    sys.stdout = Logger(os.path.join(model_path, 'log.txt'))
+    logger.set_log_file(os.path.join(model_path, 'log.txt'))
 
     print(f'\nModel: {config.model}')
 
     print(f'Used .csv file for evaluating: {config.evaluate_csv}')
 
     model = TimmModel(config.model,
-                      pretrained=True,
-                      img_size=config.img_size
-                      )
-                          
+                    pretrained=True,
+                    img_size=config.img_size
+                    )
+                        
     data_config = model.get_config()
     print(data_config)
     mean = data_config['mean']
@@ -106,7 +131,7 @@ if __name__ == '__main__':
     
     img_size_sat = (img_size, img_size)
     img_size_spectro = (config.patch_time_steps, config.n_mels)
-     
+    
     # load pretrained Checkpoint    
     if config.checkpoint_start is not None:  
         print('Start from:', config.checkpoint_start)
@@ -120,11 +145,11 @@ if __name__ == '__main__':
 
     # Print information about Spectrogram settings
     print(f'Spectrogram details:\n'
-          f'\tSample rate: {config.sr_kHz} kHz\n'
-          f'\tn_mels: {config.n_mels}\n'
-          f'\tPatch width (time steps): {config.patch_time_steps}'
-          )     
-           
+        f'\tSample rate: {config.sr_kHz} kHz\n'
+        f'\tn_mels: {config.n_mels}\n'
+        f'\tPatch width (time steps): {config.patch_time_steps}'
+        )     
+        
     # Model to device   
     model = model.to(config.device)
 
@@ -167,11 +192,11 @@ if __name__ == '__main__':
                                               patch_time_steps=config.patch_time_steps,
                                               sr_kHz=config.sr_kHz,
                                               n_mels=config.n_mels,
-                                              #stride=config.patch_time_steps//2,
+                                              #stride=stride,
                                               min_frame=None,
                                               chunking=False,
                                               dB_power_weights=False,
-                                              use_power_weights=True,
+                                              use_power_weights=False,
                                               )
     
     spectro_dataloader_test = DataLoader(spectro_dataset_test,
@@ -182,7 +207,7 @@ if __name__ == '__main__':
                                          )
     
     print('Reference (Sat) Images Test:', len(sat_dataset_test))
-    print('Reference (Spectro) Wav2Vec Test:', len(spectro_dataset_test))
+    print('Query (Spectro) Images Test:', len(spectro_dataset_test))
 
     #-----------------------------------------------------------------------------#
     # Evaluate                                                                    #
@@ -202,7 +227,7 @@ if __name__ == '__main__':
 
     print("\nNow starting Evaluation with [CHUNKING] enabled:\n")
 
-    query_dataloader.dataset.switch_chunking(True)
+    spectro_dataloader_test.dataset.switch_chunking(True)
     
     r1_test_chunked = evaluate(config=config,
                                model=model,
@@ -212,3 +237,4 @@ if __name__ == '__main__':
                                step_size=1000,
                                cleanup=True
                                )  
+    

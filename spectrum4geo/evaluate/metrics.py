@@ -1,5 +1,6 @@
-import torch
 import gc
+import faiss
+import torch
 
 import numpy as np
 import pandas as pd
@@ -50,17 +51,21 @@ def evaluate(config,
 def calc_sim(config,
              model,
              reference_dataloader,
-             query_dataloader, 
+             query_dataloader,
+             min_bound_km, 
              ranks=[1, 5, 10],
              step_size=1000,
              cleanup=True):
     
-    split_path = Path(config.data_folder) / config.evaluate_csv
-    meta_df = pd.read_csv(split_path)
+    meta_df = query_dataloader.dataset.meta.copy() #TODO: can be implemented in evaluate fct instead too. but first check!
+
+    # used to select fitting predict function for used approach
+    query_predict = get_predict_fct(query_dataloader)
+    reference_predict = get_predict_fct(reference_dataloader)
     
     print("\nExtract Features:")
-    reference_features, reference_labels = predict(config, model, reference_dataloader) 
-    query_features, query_labels = predict(config, model, query_dataloader)
+    query_features, query_labels = query_predict(config, model, query_dataloader)
+    reference_features, reference_labels = reference_predict(config, model, reference_dataloader)
     
     print("Compute Scores Train:")
     label_ids_until_hit = calculate_label_ids_until_hit(query_features, reference_features, reference_labels, step_size=step_size)
@@ -70,12 +75,15 @@ def calc_sim(config,
     region_wise_recalls = calculate_region_wise_recalls(label_ids_until_hit, meta_df, calc_ranks=ranks, print_ranks=[])
     calculate_balanced_continental_recalls(region_wise_recalls)
     
-    near_dict = calculate_nearest(query_features=query_features,
-                                  reference_features=reference_features,
-                                  query_labels=query_labels,
-                                  reference_labels=reference_labels,
-                                  neighbour_range=config.neighbour_range,
-                                  step_size=step_size)
+    near_dict = calculate_nearest_v2(query_features=query_features,
+                                     reference_features=reference_features,
+                                     query_labels=query_labels,
+                                     reference_labels=reference_labels,
+                                     metadata_df=meta_df,
+                                     min_bound_km=min_bound_km,
+                                     neighbour_range=config.neighbour_range,
+                                     step_size=step_size
+                                     )
             
     # cleanup and free memory on GPU
     if cleanup:
@@ -303,7 +311,6 @@ def calculate_balanced_continental_recalls(region_wise_recalls):
 
 
 def calculate_nearest(query_features, reference_features, query_labels, reference_labels, neighbour_range=64, step_size=1000):
-
     Q = len(query_features)
     steps = Q // step_size + 1
     similarity = []
@@ -337,4 +344,105 @@ def calculate_nearest(query_features, reference_features, query_labels, referenc
         nearest = topk_references[i][mask[i]][:neighbour_range]
         nearest_dict[query_labels[i].item()] = list(nearest)
 
+    return nearest_dict
+
+
+def calculate_nearest_v2(query_features, reference_features, query_labels, reference_labels, metadata_df, min_bound_km, neighbour_range=64, step_size=1000):
+    Q = len(query_features)
+    steps = Q // step_size + (Q % step_size > 0)
+    similarity = []
+
+    # Calculate similarity in batches
+    for i in range(steps):
+        start = step_size * i
+        end = min(start + step_size, Q)
+        sim_tmp = query_features[start:end] @ reference_features.T
+        similarity.append(sim_tmp.cpu())
+
+    coordinates = metadata_df.loc[:, ['latitude', 'longitude']].to_numpy()
+    similarity = torch.cat(similarity, dim=0)
+    nearest_dict = dict()
+
+    dist = DistanceMetric.get_metric('haversine')
+
+    for i in range(Q):
+        query_idx = query_labels[i].item()
+        query_lat_lon = coordinates[query_idx]
+        valid_refs = []
+        attempt = 0
+        topk_multiplier = 5
+
+        while len(valid_refs) < neighbour_range:
+            topk_scores, topk_ids = torch.topk(similarity[i], k=min(neighbour_range * topk_multiplier, len(reference_features)), dim=0)
+            ref_indices = reference_labels[topk_ids].cpu().numpy()
+            ref_lat_lons = coordinates[ref_indices]
+
+            # Calculate distances
+            distances_km = dist.pairwise(np.radians([query_lat_lon]), np.radians(ref_lat_lons)).flatten() * 6371
+
+            # Apply filtering conditions
+            mask = (distances_km > min_bound_km) & (ref_indices != query_idx) & (~np.isin(ref_indices, valid_refs))
+            selected_refs = ref_indices[mask]
+
+            # Collect valid references until reaching the neighbour range
+            needed = neighbour_range - len(valid_refs)
+            valid_refs.extend(selected_refs[:needed])
+
+            if len(valid_refs) < neighbour_range:
+                #print(f"Attempt {attempt+1} failed for query ID {query_idx}: Only found {len(valid_refs)} valid references out of required {neighbour_range}")
+                topk_multiplier += 10  # Increase the multiplier to fetch more candidates
+                attempt += 1 # if attempt = 5
+
+                # If maximum attempts reached, fill remaining with random selection, ensuring they're unique and not the query idx
+                if attempt == 5:  # assuming a maximum number of attempts
+                    all_possible = ref_indices[(ref_indices != query_idx) & (~np.isin(ref_indices, valid_refs))]
+                    needed = neighbour_range - len(valid_refs)
+                    if len(all_possible) >= needed:
+                        valid_refs.extend(np.random.choice(all_possible, needed, replace=False))
+                    break
+
+            else:
+                break
+
+        nearest_dict[query_idx] = valid_refs
+
+    return nearest_dict
+
+
+def calculate_nearest_v3(query_features, reference_features, query_labels, reference_labels, neighbour_range=64, step_size=1000):
+    # Convert features to numpy arrays
+    query_features_np = query_features.cpu().numpy()
+    reference_features_np = reference_features.cpu().numpy()
+
+    # Initialize faiss index
+    dimension = 1024  # Assuming the dimension of the features is 1024
+    index = faiss.IndexHNSWFlat(dimension, 32)  # HNSW index with M=64
+    index.hnsw.efConstruction = 200
+    index.hnsw.efSearch = 128 
+    # Add reference features to the index
+    index.add(query_features_np)
+    
+    # Search for nearest neighbors
+    D, I = index.search(reference_features_np, neighbour_range + 1)
+    
+    topk_references = []
+    
+    for i in range(len(I)):
+        topk_references.append(reference_labels[I[i, :]])
+
+    topk_references = torch.stack(topk_references, dim=0)
+    
+    # mask for ids without gt hits
+    mask = topk_references != query_labels.unsqueeze(1)
+    
+    topk_references = topk_references.cpu().numpy()
+    mask = mask.cpu().numpy()
+    
+    # dict that only stores ids where similarity higher than the lowest gt hit score
+    nearest_dict = dict()
+    
+    for i in range(len(topk_references)):
+        nearest = topk_references[i][mask[i]][:neighbour_range]
+        nearest_dict[query_labels[i].item()] = list(nearest)
+    
     return nearest_dict

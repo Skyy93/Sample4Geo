@@ -56,7 +56,7 @@ class SpectroEvalDataset(Dataset):
                  data_folder='data',
                  split_csv = 'valid_df.csv',
                  transforms = None,
-                 patch_time_steps=120,
+                 patch_time_steps=4096,
                  sr_kHz=48,
                  n_mels=128,
                  stride=None,
@@ -83,7 +83,7 @@ class SpectroEvalDataset(Dataset):
         # enables the creation of power-weights for chunks 
         self.use_power_weights = use_power_weights
         # default stride to patch_time_steps if not provided
-        self.stride = stride if stride is not None else patch_time_steps  
+        self.stride = patch_time_steps - stride if stride is not None else patch_time_steps  
         # min_frame is min_length of cutted spectrogram inside an chunk
         self.min_frame = min_frame if min_frame is not None else 0  
         # Set to True after first initialization
@@ -292,7 +292,7 @@ class WavEvalDataset(Dataset):
         # enables the creation of power-weights for chunks 
         self.use_power_weights = use_power_weights
         # default stride to sample_length if not provided
-        self.stride = int(stride_s * self.sample_rate) if stride_s is not None else self.sample_length
+        self.stride = self.sample_length - int(stride_s * self.sample_rate) if stride_s is not None else self.sample_length
         # min_frame is min_length of cutted waveform inside an chunk
         self.min_frame = int(min_frame_s * self.sample_rate) if min_frame_s is not None else 0  
         # Set to True after first initialization
@@ -381,9 +381,8 @@ class WavEvalDataset(Dataset):
         """for both __getitem__ methods"""
         wav_path = str(self.data_folder / f'mono_audio_wav_{self.sr_kHz}kHz' / f'{key}.wav')
         wav, file_sr = torchaudio.load(wav_path, normalize = True)
-        wav = torchaudio.functional.vad(wav, file_sr)
         wav_np = wav.numpy()    
-    
+
         # Cut the chunk from the waveform
         end_sample = start_sample + self.sample_length
         wav_np = wav_np[:, start_sample:end_sample]
@@ -393,7 +392,7 @@ class WavEvalDataset(Dataset):
             # Reshape the waveform to (1, samples) if it is mono
             if wav_np.ndim == 1:
                 wav_np = np.expand_dims(wav_np, axis=0)
-            elif wav.shape[1] == 1:
+            elif wav_np.shape[1] == 1:
                 wav_np = wav_np.T
         
             wav_np = self.transforms(samples=wav_np, sample_rate=self.sample_rate)
@@ -487,5 +486,5 @@ class WavEvalDataLoader(DataLoader):
 
         return waveform_tensor_stack, attention_mask_tensor_stack, label_tensor_stack, weigth_tensor_stack
 
-    def __len__(self, batch):
+    def __len__(self):
         return ceil(len(self.dataset)/self.batch_size)

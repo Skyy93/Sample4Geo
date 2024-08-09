@@ -12,7 +12,7 @@ from tqdm import tqdm
 from pathlib import Path 
 from torch.utils.data import Dataset
 from transformers import Wav2Vec2Processor
-from spectrum4geo.utils import apply_viridis_colormap
+from spectrum4geo.utils import apply_viridis_colormap, deterministic_seed
 
 
 class SatSpectroTrainDataset(Dataset):
@@ -49,6 +49,8 @@ class SatSpectroTrainDataset(Dataset):
         self.time_step = self.hop_length / sr_kHz * 1e3 #  timestep between two datapoints (X-Direction)
         self.n_mels = n_mels  # Specifies the number of Mel bands (frequency bands) to use in the Mel spectrogram
         
+        self.seed = 0 # init
+        self.rng = np.random.RandomState()
         self.shuffle_batch_size = shuffle_batch_size
         self.train_ids = self.meta.index.tolist()
         self.samples = copy.deepcopy(self.train_ids)
@@ -71,23 +73,29 @@ class SatSpectroTrainDataset(Dataset):
             sat_img_tensor = torch.from_numpy(sat_img)
             sat_img_tensor = sat_img_tensor.permute(2, 0, 1)
 
+        # make deterministic random choices
+        self.rng.seed(deterministic_seed(self.seed, idx))
+
         # rotate sat img 90 or 180 or 270
-        if np.random.random() < self.prob_rotate:
-            r = np.random.choice([1,2,3])
+        if self.rng.rand() < self.prob_rotate:
+            r = self.rng.choice([1, 2, 3])
             sat_img_tensor = torch.rot90(sat_img_tensor, k=r, dims=(1, 2)) 
 
         spectrogram = np.load(self.data_folder / 'spectrograms' / f'{self.n_mels}mel_{self.sr_kHz}kHz' / f'{key}.npy')
 
+        # make deterministic random choices
+        self.rng.seed(deterministic_seed(self.seed, idx))
+
         # Check if the spectrogram is too short, and if so, add the needed padding on the left and right randomly
         if spectrogram.shape[1] < self.patch_time_steps:
             padding_width = self.patch_time_steps - spectrogram.shape[1]
-            left_padding = np.random.randint(0, padding_width + 1) 
+            left_padding = self.rng.randint(0, padding_width + 1)
             right_padding = padding_width - left_padding
             spectrogram = np.pad(spectrogram, ((0, 0), (left_padding, right_padding)), mode='constant', constant_values=-80) # Assumption: -80 dB is considered silence
 
         # Cut a random patch if the spectrogram is wide enough
         elif spectrogram.shape[1] > self.patch_time_steps:
-            start = torch.randint(0, spectrogram.shape[1] - self.patch_time_steps + 1, (1,)).item()
+            start = self.rng.randint(0, spectrogram.shape[1] - self.patch_time_steps + 1)
             spectrogram = spectrogram[:, start:start + self.patch_time_steps]
             
         spectrogram = apply_viridis_colormap(spectrogram)
@@ -104,6 +112,9 @@ class SatSpectroTrainDataset(Dataset):
     
     def __len__(self):
         return len(self.samples)
+    
+    def set_random_seed(self, value):
+        self.seed = value
         
     def shuffle(self, sim_dict=None, neighbour_select=64, neighbour_range=128):
         '''
@@ -111,13 +122,17 @@ class SatSpectroTrainDataset(Dataset):
         '''
         print("\nShuffle Dataset:")
 
+        # If sim_dict is None, perform a random shuffle of self.samples
+        if sim_dict is None:
+            self.samples = copy.deepcopy(self.train_ids)
+            random.shuffle(self.samples)
+            print("Random shuffle performed as sim_dict is None")
+            return
+
         # Prepare a list of indices based on the metadata dataframe
         idx_pool = copy.deepcopy(self.train_ids)
-        
         neighbour_split = neighbour_select // 2
-        
-        if sim_dict is not None:
-            similarity_pool = copy.deepcopy(sim_dict)
+        similarity_pool = copy.deepcopy(sim_dict)
             
         # Shuffle the order of indices
         random.shuffle(idx_pool)
@@ -201,6 +216,77 @@ class SatSpectroTrainDataset(Dataset):
         print("First Element ID: {} - Last Element ID: {}".format(self.samples[0], self.samples[-1]))
 
 
+class SpectroSimDataset(Dataset):
+    def __init__(self,
+                 data_folder='data',
+                 split_csv = 'train_df.csv',
+                 transforms=None,
+                 patch_time_steps=120,
+                 sr_kHz=48,
+                 n_mels=128,
+                 ):
+        
+        super().__init__()
+
+        self.data_folder = Path(data_folder)
+        self.meta = pd.read_csv(str(self.data_folder / split_csv))
+        self.idx2key = self.meta['short_key'].to_dict()
+        self.transforms_spectrogram = transforms   
+
+        self.patch_time_steps = patch_time_steps # Count of datapoints (X-Direction)
+        self.sr_kHz = sr_kHz
+        self.hop_length = 512
+        # hop length: librosa(default) = 512
+        # if default: hop_length = win_length//4
+        #                          win_length = n_fft
+        #                                       n_fft = 2048
+        self.time_step = self.hop_length / sr_kHz * 1e3 #  timestep between two datapoints (X-Direction)
+        self.n_mels = n_mels  # Specifies the number of Mel bands (frequency bands) to use in the Mel spectrogram
+        
+        self.seed = 0 # init
+        self.rng = np.random.RandomState()
+        self.samples = self.meta.index.tolist()
+                                   
+    def __getitem__(self, index):
+        idx = self.samples[index] # obsolete! -> index is idx
+        key = self.idx2key[idx]
+
+        spectrogram = np.load(self.data_folder / 'spectrograms' / f'{self.n_mels}mel_{self.sr_kHz}kHz' / f'{key}.npy')
+
+        # make deterministic random choices
+        self.rng.seed(deterministic_seed(self.seed, idx))
+
+        # Check if the spectrogram is too short, and if so, add the needed padding on the left and right randomly
+        if spectrogram.shape[1] < self.patch_time_steps:
+            padding_width = self.patch_time_steps - spectrogram.shape[1]
+            left_padding = self.rng.randint(0, padding_width + 1)
+            right_padding = padding_width - left_padding
+            spectrogram = np.pad(spectrogram, ((0, 0), (left_padding, right_padding)), mode='constant', constant_values=-80) # Assumption: -80 dB is considered silence
+
+        # Cut a random patch if the spectrogram is wide enough
+        elif spectrogram.shape[1] > self.patch_time_steps:
+            start = self.rng.randint(0, spectrogram.shape[1] - self.patch_time_steps + 1)
+            spectrogram = spectrogram[:, start:start + self.patch_time_steps]
+            
+        spectrogram = apply_viridis_colormap(spectrogram)
+
+        if self.transforms_spectrogram is not None:
+            spectrogram_tensor = self.transforms_spectrogram(image=spectrogram)['image']
+        else:
+            spectrogram_tensor = torch.from_numpy(spectrogram)
+            spectrogram_tensor = spectrogram.permute(2, 0, 1)
+
+        id_label_tensor = torch.tensor(idx, dtype=torch.long)  
+
+        return spectrogram_tensor, id_label_tensor 
+    
+    def __len__(self):
+        return len(self.samples)
+    
+    def set_random_seed(self, value):
+        self.seed = value
+        
+        
 class SatWavTrainDataset(Dataset):
     def __init__(self,
                  data_folder='data',
@@ -261,42 +347,42 @@ class SatWavTrainDataset(Dataset):
 
         # Load the audio file
         wav_path = str(self.data_folder / f'mono_audio_wav_{self.sr_kHz}kHz' / f'{key}.wav')
-        waveform, file_sr = torchaudio.load(wav_path, normalize = True)
-        waveform = torchaudio.functional.vad(waveform, file_sr)
-        waveform_np = waveform.numpy()
+        wav, file_sr = torchaudio.load(wav_path, normalize = True)
+        wav_np = wav.numpy()
 
         # Check if the sample rate matches the expected sample rate
         if file_sr != self.sample_rate:
             raise ValueError(f"Sample rate of {wav_path} is {file_sr*1e-3} kHz, but expected {self.sr_kHz} kHz")
         
         # Choose a random Audiosegment inside the sample
-        if waveform_np.shape[1] > self.sample_length:
-            max_start = waveform_np.shape[1] - self.sample_length
+        if wav_np.shape[1] > self.sample_length:
+            max_start = wav_np.shape[1] - self.sample_length
             start = random.randint(0, max_start)
-            waveform_np = waveform_np[:, start:start + self.sample_length]
+            wav_np = wav_np[:, start:start + self.sample_length]
         
         # Apply audio transforms
         if self.transforms_wave is not None:
             # Reshape the waveform to (1, samples) if it is mono
-            if waveform_np.ndim == 1:
-                waveform_np = np.expand_dims(waveform_np, axis=0)
-            elif waveform.shape[1] == 1:
-                waveform_np = waveform_np.T
+            if wav_np.ndim == 1:
+                wav_np = np.expand_dims(wav_np, axis=0)
+            elif wav_np.shape[1] == 1:
+                wav_np = wav_np.T
         
-            waveform_np = self.transforms_wave(samples=waveform_np, sample_rate=self.sample_rate)
+            wav_np = self.transforms_wave(samples=wav_np, sample_rate=self.sample_rate)
 
         # Remove the channel dimension to get a 1D array
-        waveform_np = waveform_np.squeeze(axis=0)
+        wav_np = wav_np.squeeze(axis=0)
 
         label_id_tensor = torch.tensor(idx, dtype=torch.long)  
 
-        return img_tensor, waveform_np, label_id_tensor
+        return img_tensor, wav_np, label_id_tensor
+
 
     def collate_fn(self, batch):
         """This function needs to be provided to the DataLoader during initialization."""
-        img_tensor_data, waveform_np_data, label_id_tensor_data = zip(*batch)
+        img_tensor_data, wav_np_data, label_id_tensor_data = zip(*batch)
         
-        waveform_data_padded = self.processor(waveform_np_data, 
+        waveform_data_padded = self.processor(wav_np_data, 
                                               sampling_rate=self.sample_rate, 
                                               return_tensors="pt", 
                                               padding=True, 
