@@ -39,13 +39,13 @@ class Configuration:
     
     # Model
     model: str = 'convnext_base.fb_in22k_ft_in1k_384'
-
-    checkpoint_start = 'soundingearth/training/128_mel_48_kHz/4096_patch_width_256_batch_size/Shuffle_On/convnext_base.fb_in22k_ft_in1k_384/015408_0.001_neighbour_select32_furthest_GPS_Sampling/weights_e4_4.2248.pth'   
+            # soundingearth/training/128_mel_48_kHz/4096_patch_width_256_batch_size/Shuffle_On/convnext_base.fb_in22k_ft_in1k_384/b-similarity/175030_0.001_neighbour_select32_b_similarity_start_epoch_25/weights_end.pth
+    checkpoint_start = 'soundingearth/training/128_mel_48_kHz/4096_patch_width_288_batch_size/Shuffle_Off/convnext_base.fb_in22k_ft_in1k_384/082509_0.00106_lr_256_sat/weights_end.pth'   
     n_mels, sr_kHz, patch_time_steps, batch_size, shuffle = extract_checkpoint_info(checkpoint_start)
     #n_mels, sr_kHz, patch_time_steps, batch_size, shuffle = 128, 48, 1024, 64, "BEFORE_SPLIT!!!"
 
     # Override model image size
-    img_size: int = 384                                             # for satallite images
+    img_size: int = 256                                             # for satallite images
     
     # Evaluation
     batch_size_eval: int = 64*8 
@@ -107,7 +107,7 @@ if __name__ == '__main__':
     # Model                                                                       #
     #-----------------------------------------------------------------------------#
         
-    model_path = f'{config.log_path}/{time.strftime("%H%M%S")}_gps_furthest_episode_4'
+    model_path = f'{config.log_path}/{time.strftime("%H%M%S")}_512_image'
 
     if not os.path.exists(model_path):
         os.makedirs(model_path)

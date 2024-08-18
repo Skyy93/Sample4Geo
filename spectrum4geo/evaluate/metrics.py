@@ -12,6 +12,11 @@ from sklearn.metrics import DistanceMetric
 from ..trainer import get_predict_fct
 
 
+###### From GeoCLAP, delete later ####################
+def l2normalize(batch_embeddings):
+    return batch_embeddings/batch_embeddings.norm(p=2,dim=-1, keepdim=True)
+######################################################
+
 def evaluate(config,
              model,
              reference_dataloader,
@@ -30,6 +35,11 @@ def evaluate(config,
     print("\nExtract Features:")
     query_features, query_labels = query_predict(config, model, query_dataloader)
     reference_features, reference_labels = reference_predict(config, model, reference_dataloader) 
+
+    ###### From GeoCLAP, delete later ####################
+    query_features = l2normalize(query_features)
+    reference_features = l2normalize(reference_features)
+    ######################################################
     
     print("Compute Scores:\n")
     label_ids_until_hit = calculate_label_ids_until_hit(query_features, reference_features, reference_labels, step_size=step_size)
@@ -75,12 +85,20 @@ def calc_sim(config,
     region_wise_recalls = calculate_region_wise_recalls(label_ids_until_hit, meta_df, calc_ranks=ranks, print_ranks=[])
     calculate_balanced_continental_recalls(region_wise_recalls)
     
-    near_dict = calculate_nearest_v2(query_features=query_features,
+    # near_dict = calculate_nearest_v2(query_features=query_features,
+    #                                  reference_features=reference_features,
+    #                                  query_labels=query_labels,
+    #                                  reference_labels=reference_labels,
+    #                                  metadata_df=meta_df,
+    #                                  min_bound_km=min_bound_km,
+    #                                  neighbour_range=config.neighbour_range,
+    #                                  step_size=step_size
+    #                                  )
+    
+    near_dict = calculate_nearest_v3(query_features=query_features,
                                      reference_features=reference_features,
                                      query_labels=query_labels,
                                      reference_labels=reference_labels,
-                                     metadata_df=meta_df,
-                                     min_bound_km=min_bound_km,
                                      neighbour_range=config.neighbour_range,
                                      step_size=step_size
                                      )

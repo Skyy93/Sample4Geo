@@ -171,3 +171,7 @@ tensorflow_test.py
 backup/
 
 eval_geoclap.ipynb
+
+data_prep2/
+
+geoclap/

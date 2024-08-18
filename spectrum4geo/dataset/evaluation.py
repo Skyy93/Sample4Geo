@@ -83,7 +83,7 @@ class SpectroEvalDataset(Dataset):
         # enables the creation of power-weights for chunks 
         self.use_power_weights = use_power_weights
         # default stride to patch_time_steps if not provided
-        self.stride = patch_time_steps - stride if stride is not None else patch_time_steps  
+        self.frame_start = patch_time_steps - stride if stride is not None else patch_time_steps  
         # min_frame is min_length of cutted spectrogram inside an chunk
         self.min_frame = min_frame if min_frame is not None else 0  
         # Set to True after first initialization
@@ -104,7 +104,7 @@ class SpectroEvalDataset(Dataset):
         for idx, key in tqdm(self.idx2key.items(), desc="Precalculating amount of chunks", total=len(self.idx2key)):
             spectro_full = np.load(self.data_folder / 'spectrograms' / f'{self.n_mels}mel_{self.sr_kHz}kHz' / f'{key}.npy')
             total_frames = spectro_full.shape[1] - self.min_frame
-            chunk = ceil(total_frames / self.stride)
+            chunk = ceil(total_frames / self.frame_start)
 
             self.idx2ccount[idx] = chunk        
             for chunk_nr in range(0, chunk):
@@ -126,7 +126,7 @@ class SpectroEvalDataset(Dataset):
                         last_idx = idx
                     # Cut the chunk from the spectrogram
                     chunk_num = self.cidx2chunk[cidx]
-                    start_sample = chunk_num * self.stride
+                    start_sample = chunk_num * self.frame_start
                     end_sample = start_sample + self.patch_time_steps
                     # Select the specified chunk
                     spectro_chunk = spectro_full[:, start_sample:end_sample]
@@ -165,7 +165,7 @@ class SpectroEvalDataset(Dataset):
                         last_idx = idx
                     # Cut the chunk from the spectrogram
                     chunk_num = self.cidx2chunk[cidx]
-                    start_sample = chunk_num * self.stride
+                    start_sample = chunk_num * self.frame_start
                     end_sample = start_sample + self.patch_time_steps
                     # Select the specified chunk
                     spectro_chunk = spectro_full[:, start_sample:end_sample]
@@ -203,7 +203,7 @@ class SpectroEvalDataset(Dataset):
         chunk_num = self.cidx2chunk[cidx]
         weight = self.cidx2weight[cidx]
 
-        spectro_tensor = self.__get_spectro(key, chunk_num * self.stride)
+        spectro_tensor = self.__get_spectro(key, chunk_num * self.frame_start)
         label_id_tensor = torch.tensor(idx, dtype=torch.long)
         weight_tensor = torch.tensor(weight, dtype=torch.float)
 
@@ -292,7 +292,7 @@ class WavEvalDataset(Dataset):
         # enables the creation of power-weights for chunks 
         self.use_power_weights = use_power_weights
         # default stride to sample_length if not provided
-        self.stride = self.sample_length - int(stride_s * self.sample_rate) if stride_s is not None else self.sample_length
+        self.frame_start = self.sample_length - int(stride_s * self.sample_rate) if stride_s is not None else self.sample_length
         # min_frame is min_length of cutted waveform inside an chunk
         self.min_frame = int(min_frame_s * self.sample_rate) if min_frame_s is not None else 0  
         # Set to True after first initialization
@@ -315,7 +315,7 @@ class WavEvalDataset(Dataset):
             wav, file_sr = torchaudio.load(wav_path, normalize = True)
             wav = wav.numpy()    
             total_frames = wav.shape[1] - self.min_frame
-            chunk = ceil(total_frames / self.stride)
+            chunk = ceil(total_frames / self.frame_start)
 
             self.idx2ccount[idx] = chunk        
             for chunk_nr in range(0, chunk):
@@ -337,7 +337,7 @@ class WavEvalDataset(Dataset):
                     last_idx = idx
                 # Cut the chunk from the spectrogram
                 chunk_num = self.cidx2chunk[cidx]
-                start_sample = chunk_num * self.stride
+                start_sample = chunk_num * self.frame_start
                 end_sample = start_sample + self.sample_length
                 # Select the specified chunk
                 wav_chunk = wav_full[:, start_sample:end_sample]
@@ -371,7 +371,7 @@ class WavEvalDataset(Dataset):
         chunk_num = self.cidx2chunk[cidx]
         weight = self.cidx2weight[cidx]
 
-        wav_np = self.__get_wav(key, chunk_num * self.stride)
+        wav_np = self.__get_wav(key, chunk_num * self.frame_start)
         label_id_tensor = torch.tensor(idx, dtype=torch.long)
         weight_tensor = torch.tensor(weight, dtype=torch.float)
 

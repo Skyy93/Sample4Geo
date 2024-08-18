@@ -32,13 +32,13 @@ class Configuration:
     model: str = 'convnext_base.fb_in22k_ft_in1k_384' 
     
     # Override model image size
-    img_size: int = 384                          # for satallite images
+    img_size: int = 256                          # for satallite images
     patch_time_steps: int = 4096                 # Image size for spectrograms (Width)
     n_mels: int = 128                            # image size for spectrograms (Height)
     sr_kHz: float = 48
 
     # Training 
-    batch_size: int = 256                        # keep in mind real_batch_size = batch_size * (1 + spectrogramm.shape/img.shape)
+    batch_size: int = 288                        # keep in mind real_batch_size = batch_size * (1 + spectrogramm.shape/img.shape)
     mixed_precision: bool = True
     seed = 42
     epochs: int = 40
@@ -52,10 +52,10 @@ class Configuration:
     normalize_features: bool = True
     
     # Similarity Sampling
-    custom_sampling: bool = True                 # use custom sampling instead of random     -> To False for not using shuffle function of dataloader!
+    custom_sampling: bool = False                 # use custom sampling instead of random     -> To False for not using shuffle function of dataloader!
     gps_sample: bool = False                       # use gps sampling                          -> To False for not using shuffle function of dataloader!
     min_bound_km: int = 0
-    sim_sample: bool = True                      # use similarity sampling                   -> To False for not using shuffle function of dataloader!
+    sim_sample: bool = False                      # use similarity sampling                   -> To False for not using shuffle function of dataloader!
     neighbour_select: int = 32  #32 #128          # max selection size from pool
     neighbour_range: int = 256                   # pool size for selection
     gps_dict_path: str = 'data/gps_dict_256.pkl' # path to pre-computed distances
@@ -69,7 +69,7 @@ class Configuration:
     label_smoothing: float = 0.1
     
     # Learning Rate
-    lr: float = 0.001                           # 1 * 10^-4 for ViT | 1 * 10^-1 for CNN
+    lr: float = 0.001 * sqrt(288/256)           # 1 * 10^-4 for ViT | 1 * 10^-1 for CNN
     scheduler: str = 'cosine'                   # 'polynomial' | 'cosine' | 'constant' | None
     warmup_epochs: int = 1
     lr_end: float = 0.00001                     #  only for 'polynomial'
@@ -93,8 +93,8 @@ class Configuration:
     zero_shot: bool = False 
     
     # Checkpoint to start from
-    start_epoch = 5 #13                             # 5 if you choose an checkpoint of epoch 4   / 8 if 7 / 13 if 12
-    checkpoint_start = 'soundingearth/training/128_mel_48_kHz/4096_patch_width_256_batch_size/Shuffle_Off/convnext_base.fb_in22k_ft_in1k_384/020318_0.001_lr_best/weights_e4_3.4781.pth' # None # 'soundingearth/training/128_mel_48_kHz/4096_patch_width_256_batch_size/Shuffle_On/convnext_base.fb_in22k_ft_in1k_384/nice ones/After_episode_7_110137_0.001_lr_loaded_checkpoint_start_epoch_8_neighbour_select8/weights_e12_9.4714.pth'  
+    start_epoch = 0 #13                             # 5 if you choose an checkpoint of epoch 4   / 8 if 7 / 13 if 12
+    checkpoint_start = None #'soundingearth/training/128_mel_48_kHz/4096_patch_width_256_batch_size/Shuffle_On/convnext_base.fb_in22k_ft_in1k_384/110128_0.001_neighbour_select32_b_similarity_start_epoch_17_new_fabian_version/weights_e34_14.1678.pth' # None # 'soundingearth/training/128_mel_48_kHz/4096_patch_width_256_batch_size/Shuffle_On/convnext_base.fb_in22k_ft_in1k_384/nice ones/After_episode_7_110137_0.001_lr_loaded_checkpoint_start_epoch_8_neighbour_select8/weights_e12_9.4714.pth'  
   
     # set num_workers to 0 if on Windows
     num_workers: int = 0 if os.name == 'nt' else len(gpu_ids)//2
@@ -116,7 +116,7 @@ config = Configuration()
 
 if __name__ == '__main__':
 
-    model_path = f'{config.model_path}/{config.model}/{time.strftime("%H%M%S")}_{config.lr:.3g}_neighbour_select{config.neighbour_select}_b_similarity_start_epoch_{config.start_epoch}_no_border'
+    model_path = f'{config.model_path}/{config.model}/{time.strftime("%H%M%S")}_{config.lr:.3g}_lr_256_sat'
 
     if not os.path.exists(model_path):
         os.makedirs(model_path)
@@ -437,18 +437,6 @@ if __name__ == '__main__':
 
     best_score = 0
 
-    # delete me later
-    r1_test = evaluate(config=config,
-                    model=model,
-                    reference_dataloader=sat_dataloader_test,
-                    query_dataloader=spectro_dataloader_test, 
-                    ranks=[1, 5, 10, 50, 100],
-                    step_size=1000,
-                    cleanup=True
-                    )
-    ################################
-
-
     # Setting up seed for first epoch
     train_dataloader.dataset.set_random_seed(config.start_epoch)
     if config.sim_sample:
@@ -504,11 +492,6 @@ if __name__ == '__main__':
         
         print(f'Epoch: {epoch}, Train Loss = {train_loss:.3f}, Lr = {optimizer.param_groups[0]["lr"]:.6f}')
         
-        if torch.cuda.device_count() > 1 and len(config.gpu_ids) > 1:
-            torch.save(model.module.state_dict(), f'{model_path}/weights_e{epoch}_{r1_test:.4f}.pth')
-        else:
-            torch.save(model.state_dict(), f'{model_path}/weights_e{epoch}_{r1_test:.4f}.pth')
-
         # evaluate
         if (epoch % config.eval_every_n_epoch == 0 and epoch != 0) or epoch == config.epochs:
         
@@ -522,6 +505,11 @@ if __name__ == '__main__':
                                step_size=1000,
                                cleanup=True
                                )
+
+            if torch.cuda.device_count() > 1 and len(config.gpu_ids) > 1:
+                torch.save(model.module.state_dict(), f'{model_path}/weights_e{epoch}_{r1_test:.4f}.pth')
+            else:
+                torch.save(model.state_dict(), f'{model_path}/weights_e{epoch}_{r1_test:.4f}.pth')
                 
             #if r1_test > best_score:
             #
