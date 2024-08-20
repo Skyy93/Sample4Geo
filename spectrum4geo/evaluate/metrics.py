@@ -48,7 +48,7 @@ def evaluate(config,
 
     calculate_scores_continentwise(label_ids_until_hit, meta_df, recall_ranks=ranks, topk_recall=True) 
     region_wise_recalls = calculate_region_wise_recalls(label_ids_until_hit, meta_df, calc_ranks=ranks, print_ranks=ranks)
-    calculate_balanced_continental_recalls(region_wise_recalls)
+    calculate_continental_balanced_recalls(region_wise_recalls)
 
     # cleanup and free memory on GPU
     if cleanup:
@@ -83,7 +83,7 @@ def calc_sim(config,
     r1 = scores[0][1]
 
     region_wise_recalls = calculate_region_wise_recalls(label_ids_until_hit, meta_df, calc_ranks=ranks, print_ranks=[])
-    calculate_balanced_continental_recalls(region_wise_recalls)
+    calculate_continental_balanced_recalls(region_wise_recalls)
     
     # near_dict = calculate_nearest_v2(query_features=query_features,
     #                                  reference_features=reference_features,
@@ -177,7 +177,7 @@ def calculate_scores(label_ids_until_hit, metadata_df, recall_ranks, topk_recall
         recall_results[topk_str] = np.mean([int(count < topk) for count in count_until_hit]) * 100
 
     #### Calculating Median Rank
-    median_rank = np.median(count_until_hit)
+    median_rank = np.median(count_until_hit) + 1 # as count_until_hit contains the number of incorrect predictions UNTIL the hit
 
     #### Calculating Mean Error Distance
     coordinates = metadata_df.loc[:, ['latitude', 'longitude']]
@@ -301,16 +301,16 @@ def calculate_region_wise_recalls(label_ids_until_hit, metadata_df, calc_ranks=[
     return region_wise_recalls
 
 
-def calculate_balanced_continental_recalls(region_wise_recalls):
+def calculate_continental_balanced_recalls(region_wise_recalls):
     '''returns an dict with continents as keys and balanced recall scores as values.'''
-    print('Calculate BalancedContinentalRecalls!')
+    print('Calculate ContinentalBalancedRecalls!')
 
     # inverts region_wise_recalls dictionary from {continent: {rank: value}} to {rank: {continent: value}}
     ranks = sorted(set(rank for subdict in region_wise_recalls.values() for rank in subdict.keys()))
     region_wise_recalls = {rank: {continent: region_wise_recalls[continent].get(rank, None) for continent in region_wise_recalls} for rank in ranks}
 
     header_format = ' | '.join(['{:<29}' for _ in ranks])
-    headers = [f'BalancedContinentalRecall@{rank}' for rank in ranks]
+    headers = [f'ContinentalBalancedRecall@{rank}' for rank in ranks]
     header_formated = (header_format).format(*headers)
     print(header_formated)
     print('-' * (len(header_formated)))
